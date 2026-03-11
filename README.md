@@ -25,13 +25,13 @@ Then run `daspkg install`.
 
 ## Build
 
-The package requires a C++ build step. After install, build with:
+The C++ build step runs automatically during `daspkg install`. To rebuild manually:
 
 ```bash
 daspkg build dasImguiNodeEditor
 ```
 
-Or manually:
+Or with CMake directly:
 
 ```bash
 cmake -B modules/dasImguiNodeEditor/_build -S modules/dasImguiNodeEditor -DDASLANG_DIR=<path-to-daslang-root>
