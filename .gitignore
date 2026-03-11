@@ -1,0 +1,4 @@
+*.shared_module
+*.lib
+*.exp
+_build/
