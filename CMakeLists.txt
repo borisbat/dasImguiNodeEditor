@@ -82,11 +82,13 @@ target_include_directories(dasModuleImguiNodeEditor PRIVATE
 if(WIN32)
     target_link_libraries(dasModuleImguiNodeEditor PRIVATE
         ${DASLANG_DIR}/lib/Release/libDaScriptDyn.lib
+        ${DASLANG_DIR}/lib/Release/libDaScriptDyn_runtime.lib
         ${DAS_MODULE_IMGUI_LIB}
     )
 else()
     target_link_libraries(dasModuleImguiNodeEditor PRIVATE
         ${DASLANG_DIR}/lib/libDaScriptDyn.so
+        ${DASLANG_DIR}/lib/libDaScriptDyn_runtime.so
         ${DAS_IMGUI_DIR}/dasModuleImgui.shared_module
     )
 endif()

@@ -1,7 +1,7 @@
-// this file is generated via daScript automatic C++ binder
+// this file is generated via Daslang automatic binder
 // all user modifications will be lost after this file is re-generated
 
-// from D:\daScript\github\daScript/Modules/dasImgui/imgui-node-editor/imgui_node_editor.h:46:12
+// from imgui_node_editor.h:46:12
 class Enumeration_ax_NodeEditor_PinKind : public das::Enumeration {
 public:
 	Enumeration_ax_NodeEditor_PinKind() : das::Enumeration("PinKind") {
@@ -13,7 +13,7 @@ public:
 	}
 };
 
-// from D:\daScript\github\daScript/Modules/dasImgui/imgui-node-editor/imgui_node_editor.h:52:12
+// from imgui_node_editor.h:52:12
 class Enumeration_ax_NodeEditor_FlowDirection : public das::Enumeration {
 public:
 	Enumeration_ax_NodeEditor_FlowDirection() : das::Enumeration("FlowDirection") {
@@ -25,7 +25,7 @@ public:
 	}
 };
 
-// from D:\daScript\github\daScript/Modules/dasImgui/imgui-node-editor/imgui_node_editor.h:58:12
+// from imgui_node_editor.h:58:12
 class Enumeration_ax_NodeEditor_CanvasSizeMode : public das::Enumeration {
 public:
 	Enumeration_ax_NodeEditor_CanvasSizeMode() : das::Enumeration("CanvasSizeMode") {
@@ -38,7 +38,7 @@ public:
 	}
 };
 
-// from D:\daScript\github\daScript/Modules/dasImgui/imgui-node-editor/imgui_node_editor.h:67:12
+// from imgui_node_editor.h:67:12
 class Enumeration_ax_NodeEditor_SaveReasonFlags : public das::Enumeration {
 public:
 	Enumeration_ax_NodeEditor_SaveReasonFlags() : das::Enumeration("SaveReasonFlags") {
@@ -56,7 +56,7 @@ public:
 	}
 };
 
-// from D:\daScript\github\daScript/Modules/dasImgui/imgui-node-editor/imgui_node_editor.h:130:6
+// from imgui_node_editor.h:130:6
 class Enumeration_ax_NodeEditor_StyleColor : public das::Enumeration {
 public:
 	Enumeration_ax_NodeEditor_StyleColor() : das::Enumeration("StyleColor") {
@@ -86,7 +86,7 @@ public:
 	}
 };
 
-// from D:\daScript\github\daScript/Modules/dasImgui/imgui-node-editor/imgui_node_editor.h:155:6
+// from imgui_node_editor.h:155:6
 class Enumeration_ax_NodeEditor_StyleVar : public das::Enumeration {
 public:
 	Enumeration_ax_NodeEditor_StyleVar() : das::Enumeration("StyleVar") {

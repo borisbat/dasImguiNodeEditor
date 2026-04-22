@@ -1,7 +1,7 @@
-// this file is generated via daScript automatic C++ binder
+// this file is generated via Daslang automatic binder
 // all user modifications will be lost after this file is re-generated
 
-// from D:\daScript\github\daScript/Modules/dasImgui/imgui-node-editor/imgui_node_editor.h:90:8
+// from imgui_node_editor.h:90:8
 struct ax_NodeEditor_Config_GeneratedAnnotation : ManagedStructureAnnotation<ax::NodeEditor::Config> {
 	virtual bool isLocal() const override { return true; }
 	virtual bool canBePlacedInContainer() const override { return true; }
@@ -19,7 +19,7 @@ struct ax_NodeEditor_Config_GeneratedAnnotation : ManagedStructureAnnotation<ax:
 	}
 };
 
-// from D:\daScript\github\daScript/Modules/dasImgui/imgui-node-editor/imgui_node_editor.h:188:8
+// from imgui_node_editor.h:188:8
 struct ax_NodeEditor_Style_GeneratedAnnotation : ManagedStructureAnnotation<ax::NodeEditor::Style> {
 	ax_NodeEditor_Style_GeneratedAnnotation(ModuleLibrary & ml) : ManagedStructureAnnotation ("Style", ml, "ax::NodeEditor::Style") {
 	}
