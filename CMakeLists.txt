@@ -80,11 +80,19 @@ target_include_directories(dasModuleImguiNodeEditor PRIVATE
     ${DAS_IMGUI_NODE_EDITOR_DIR}/src
 )
 if(WIN32)
-    target_link_libraries(dasModuleImguiNodeEditor PRIVATE
-        ${DASLANG_DIR}/lib/Release/libDaScriptDyn.lib
-        ${DASLANG_DIR}/lib/Release/libDaScriptDyn_runtime.lib
-        ${DAS_MODULE_IMGUI_LIB}
-    )
+    if(EXISTS "${DASLANG_DIR}/lib/Release/libDaScriptDyn.lib")
+        target_link_libraries(dasModuleImguiNodeEditor PRIVATE
+            ${DASLANG_DIR}/lib/Release/libDaScriptDyn.lib
+            ${DASLANG_DIR}/lib/Release/libDaScriptDyn_runtime.lib
+            ${DAS_MODULE_IMGUI_LIB}
+        )
+    else()
+        target_link_libraries(dasModuleImguiNodeEditor PRIVATE
+            ${DASLANG_DIR}/lib/libDaScriptDyn.lib
+            ${DASLANG_DIR}/lib/libDaScriptDyn_runtime.lib
+            ${DAS_MODULE_IMGUI_LIB}
+        )
+    endif()
 else()
     target_link_libraries(dasModuleImguiNodeEditor PRIVATE
         ${DASLANG_DIR}/lib/libDaScriptDyn.so
