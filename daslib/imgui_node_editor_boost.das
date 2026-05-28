@@ -5,13 +5,13 @@ options no_unused_function_arguments = false
 
 module imgui_node_editor_boost shared
 
+// Legacy v1 boost — thin block-bracket wrappers over the raw imgui-node-editor
+// Begin*/End* pairs. Superseded by `imgui_node_editor_boost_v2` (the telemetry-
+// aware, app-owned-context, queue-injectable API). Kept for back-compat; new code
+// should require `imgui/imgui_node_editor_boost_v2`.
+
 require imgui public
 require imgui_node_editor public
-
-typedef LinkId = int
-typedef PinId = int
-typedef NodeId = int
-
 
 def Begin(name : string; sz : float2; blk : block) {
     Begin(name, sz)
@@ -43,34 +43,4 @@ def BeginDelete(blk : block) {
         invoke(blk)
     }
     EndDelete()
-}
-
-def GetSelectedNodes : array<NodeId> {
-    var snc = GetSelectedObjectCount()
-    if (snc != 0) {
-        var sna : array<void?>
-        sna |> resize(snc)
-        unsafe {
-            snc = GetSelectedNodes(reinterpret<NodeId?> addr(sna[0]), snc)
-        }
-        return <- [for (x in range(snc)); NodeId(intptr(sna[x]))]
-    } else {
-        var empty : array<NodeId>
-        return <- empty
-    }
-}
-
-def GetSelectedLinks : array<LinkId> {
-    var snc = GetSelectedObjectCount()
-    if (snc != 0) {
-        var sna : array<void?>
-        sna |> resize(snc)
-        unsafe {
-            snc = GetSelectedLinks(reinterpret<LinkId?> addr(sna[0]), snc)
-        }
-        return <- [for (x in range(snc)); LinkId(intptr(sna[x]))]
-    } else {
-        var empty : array<LinkId>
-        return <- empty
-    }
 }

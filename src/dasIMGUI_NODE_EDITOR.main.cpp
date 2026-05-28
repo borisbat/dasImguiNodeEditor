@@ -9,10 +9,23 @@
 #include "aot_dasIMGUI_NODE_EDITOR.h"
 
 namespace das {
+    // Custom factory: create an editor with settings persistence disabled.
+    // imgui-node-editor gates load/save on `if (SettingsFile)` (imgui_node_editor.cpp),
+    // so nullptr disables the NodeEditor.json read/write entirely. The generated
+    // binding exposes Config::SettingsFile as `const char*` (read-only from daslang),
+    // so a setter-free factory is the supported way to disable persistence.
+    ax::NodeEditor::EditorContext * CreateEditorNoSettings() {
+        ax::NodeEditor::Config config;
+        config.SettingsFile = nullptr;
+        return ax::NodeEditor::CreateEditor(&config);
+    }
+
     void Module_dasIMGUI_NODE_EDITOR::initAotAlias () {
     }
 
 	void Module_dasIMGUI_NODE_EDITOR::initMain () {
+        addExtern<DAS_BIND_FUN(CreateEditorNoSettings)>(*this, lib, "CreateEditorNoSettings",
+            SideEffects::modifyExternal, "CreateEditorNoSettings");
         auto fnLink = findUniqueFunction("Link");
         fnLink->arg_init(3, new ExprConstFloat4(float4(1.0f)));
         // time to fix-up const & ImVec2 and const & ImVec4
@@ -40,6 +53,8 @@ namespace das {
         tw << "#include \"../modules/dasImguiNodeEditor/src/aot_dasIMGUI_NODE_EDITOR.h\"\n";
         tw << "#include \"daScript/simulate/bind_enum.h\"\n";
         tw << "#include \"../modules/dasImguiNodeEditor/src/dasIMGUI_NODE_EDITOR.enum.decl.cast.inc\"\n";
+        // forward-decl the custom factory so AOT-generated C++ can call it
+        tw << "namespace das { ax::NodeEditor::EditorContext * CreateEditorNoSettings(); }\n";
         // specifying AOT type, in this case direct cpp mode (and not hybrid mode)
         return ModuleAotType::cpp;
     }
