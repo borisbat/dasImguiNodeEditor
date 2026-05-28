@@ -2,6 +2,10 @@ options gen2
 options indenting = 4
 options no_unused_block_arguments = false
 options no_unused_function_arguments = false
+// This module IS the wrapper layer, so it legitimately calls raw
+// imgui_node_editor::* — exempt it from its own bundled lint (the lint walks
+// getThisModule, so this only matters when boost_v2 is compiled directly).
+options _allow_node_editor_native = true
 
 module imgui_node_editor_boost_v2 shared
 
@@ -9,6 +13,7 @@ require imgui public
 require imgui_node_editor public
 require imgui/imgui_boost_runtime public      // widget_prelude / container_finalize / WidgetEntry
 require imgui/imgui_boost_v2 public            // [widget]/[container] forward_argument annotations
+require imgui/imgui_node_editor_lint public    // default-on ban on raw imgui_node_editor::* in consumers
 require daslib/json
 require daslib/json_boost                       // JV for the per-entity payload
 require daslib/safe_addr                        // safe_addr(local) -> int? for the create-query bridge
@@ -58,8 +63,9 @@ def node_editor(editor : imgui_node_editor::EditorContext?; size : float2 = floa
     //! The canvas for ONE graph — `node_editor("name", (editor = ctx, size = float2(0,0))){…}`.
     //! arg0 is the verbatim path key (the canvas name); `editor` is the app-owned
     //! EditorContext. Brackets SetCurrentEditor + Begin/End. Registers as kind
-    //! "node_editor" with payload {handle: intptr(editor), name} — `handle` is the
-    //! unique id the live API targets. `widget_ident` (= the name) is macro-injected;
+    //! "node_editor" with payload {handle: intptr(editor)} built lazily at snapshot
+    //! (node_editor_payload) — `handle` is the unique id the live API targets; no
+    //! per-frame JSON. `widget_ident` (= the name) is macro-injected;
     //! child nodes/pins/links nest under it. (Macro injects widget_prelude +
     //! container_path_push/pop.)
     imgui_node_editor::SetCurrentEditor(editor)
@@ -70,7 +76,8 @@ def node_editor(editor : imgui_node_editor::EditorContext?; size : float2 = floa
     g_active_editor = null
     imgui_node_editor::SetCurrentEditor(null)
     var entry : WidgetEntry
-    entry.payload = JV((handle = intptr(editor), name = widget_ident))
+    entry.serialize_ctx = unsafe(reinterpret<void?>(editor))
+    entry.serialize = @@node_editor_payload
     finalize_entity(widget_ident, "node_editor", entry)
 }
 
@@ -116,6 +123,12 @@ def private finalize_entity_leaf(widget_ident : string; kind : string; var entry
 // selection and link topology, so nothing is stored per frame. Each brackets
 // SetCurrentEditor since the context isn't current outside the node_editor block
 // (same pattern as set_node_position).
+def private node_editor_payload(ctx : void?; id : int) : JsonValue? {
+    // The canvas exposes only the app-owned editor handle (= intptr(editor)) the
+    // live API targets; nothing to query, so no SetCurrentEditor bracket.
+    return JV((handle = intptr(ctx)))
+}
+
 def private node_payload(ctx : void?; id : int) : JsonValue? {
     let ed = unsafe(reinterpret<imgui_node_editor::EditorContext?>(ctx))
     imgui_node_editor::SetCurrentEditor(ed)
