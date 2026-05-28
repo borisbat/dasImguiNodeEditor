@@ -93,15 +93,30 @@ if(WIN32)
             ${DAS_MODULE_IMGUI_LIB}
         )
     endif()
+elseif(APPLE)
+    # daslang names the dynamic runtime liblibDaScriptDyn.dylib (CMake prepends
+    # 'lib' to the libDaScriptDyn target) — mirror dasImgui's CMakeLists.
+    target_link_libraries(dasModuleImguiNodeEditor PRIVATE
+        ${DASLANG_DIR}/lib/liblibDaScriptDyn.dylib
+        ${DASLANG_DIR}/lib/liblibDaScriptDyn_runtime.dylib
+        ${DAS_IMGUI_DIR}/dasModuleImgui.shared_module
+    )
 else()
     target_link_libraries(dasModuleImguiNodeEditor PRIVATE
-        ${DASLANG_DIR}/lib/libDaScriptDyn.so
-        ${DASLANG_DIR}/lib/libDaScriptDyn_runtime.so
+        ${DASLANG_DIR}/lib/liblibDaScriptDyn.so
+        ${DASLANG_DIR}/lib/liblibDaScriptDyn_runtime.so
         ${DAS_IMGUI_DIR}/dasModuleImgui.shared_module
     )
 endif()
 if(MSVC)
     target_compile_options(dasModuleImguiNodeEditor PRIVATE /wd4005 /bigobj)
+else()
+    # daslang runtime libs are built -fno-rtti for optimized configs; match the
+    # ABI (mirror dasImgui's SETUP_OPTIONS) or the .shared_module mislinks.
+    target_compile_options(dasModuleImguiNodeEditor PRIVATE
+        $<$<CONFIG:Release>:-fno-rtti>
+        $<$<CONFIG:MinSizeRel>:-fno-rtti>
+        $<$<CONFIG:RelWithDebInfo>:-fno-rtti>)
 endif()
 set_target_properties(dasModuleImguiNodeEditor PROPERTIES
     SUFFIX ".shared_module"
