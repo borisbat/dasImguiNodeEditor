@@ -165,8 +165,16 @@ def toolbar() {
 
 // ===== render + interaction =====
 
+def node_tint(kind : NodeKind) : float4 {
+    // Per-kind node tint, fed to node()'s `color` tuple arg. Inputs green,
+    // output red; math nodes pass a negative sentinel = keep the editor default.
+    return float4(0.15, 0.35, 0.18, 0.78) if (kind == NodeKind.TexInput || kind == NodeKind.ConstInput)
+    return float4(0.40, 0.18, 0.18, 0.78) if (kind == NodeKind.ColorOutput)
+    return float4(-1.0, -1.0, -1.0, -1.0)
+}
+
 def draw_editor(var g : Graph) {
-    node_editor(g_ed, "shader_graph") {
+    node_editor("shader_graph", (editor = g_ed, size = float2(0.0, 0.0))) {
         g_dbg_canvas = imgui_node_editor::GetScreenSize()
         g_dbg_zoom = imgui_node_editor::GetCurrentZoom()
         g_dbg_s_origin = imgui_node_editor::CanvasToScreen(float2(0.0, 0.0))
@@ -177,7 +185,7 @@ def draw_editor(var g : Graph) {
             if (g_nav_frames == 0) {
                 imgui_node_editor::SetNodePosition(n.id, n.pos)
             }
-            node(n.id) {
+            node(n.id, (color = node_tint(n.kind))) {
                 text("{n.title}")
                 for (p in n.inputs) {
                     pin(p.id, PinKind.Input) {
@@ -192,7 +200,7 @@ def draw_editor(var g : Graph) {
             }
         }
         for (l in values(g.links)) {
-            link(l.id, l.from_pin, l.to_pin)
+            link(l.id, (from = l.from_pin, to = l.to_pin))
         }
 
         begin_create(g_ed) {

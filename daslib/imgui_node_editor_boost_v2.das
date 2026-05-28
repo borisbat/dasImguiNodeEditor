@@ -8,6 +8,7 @@ module imgui_node_editor_boost_v2 shared
 require imgui public
 require imgui_node_editor public
 require imgui/imgui_boost_runtime public      // widget_prelude / container_finalize / WidgetEntry
+require imgui/imgui_boost_v2 public            // [widget]/[container] forward_argument annotations
 require daslib/json
 require daslib/json_boost                       // JV for the per-entity payload
 require daslib/safe_addr                        // safe_addr(local) -> int? for the create-query bridge
@@ -15,6 +16,12 @@ require daslib/safe_addr                        // safe_addr(local) -> int? for 
 typedef LinkId = int
 typedef PinId = int
 typedef NodeId = int
+
+// Active editor for the currently-open node_editor() block, set for its duration
+// (stored as void? — it only flows into WidgetEntry.serialize_ctx). node/pin/link
+// stash it so their lazy snapshot serializers can SetCurrentEditor before querying
+// geometry/selection by id.
+var private g_active_editor : void? = null
 
 // ===== editor canvas (app-owned context) =====
 //
@@ -46,22 +53,25 @@ def handle_to_editor(handle : uint64) : imgui_node_editor::EditorContext? {
     return unsafe(reinterpret<imgui_node_editor::EditorContext?>(handle))
 }
 
-def node_editor(ctx : imgui_node_editor::EditorContext?; name : string; blk : block) {
-    //! The canvas for ONE graph. `ctx` is the app-owned EditorContext. Brackets
-    //! SetCurrentEditor(ctx) + Begin/End. Registers as kind "node_editor" with
-    //! payload {handle: intptr(ctx), name} — `handle` is the unique id the live
-    //! API targets. Child nodes/pins/links nest under this editor's path (`name`).
-    widget_prelude(name)
-    container_path_push(name)
-    imgui_node_editor::SetCurrentEditor(ctx)
-    imgui_node_editor::Begin(name, float2(0.0, 0.0))
+[container(forward_argument=true, verbatim_path=true)]
+def node_editor(editor : imgui_node_editor::EditorContext?; size : float2 = float2(0.0, 0.0); blk : block) {
+    //! The canvas for ONE graph — `node_editor("name", (editor = ctx, size = float2(0,0))){…}`.
+    //! arg0 is the verbatim path key (the canvas name); `editor` is the app-owned
+    //! EditorContext. Brackets SetCurrentEditor + Begin/End. Registers as kind
+    //! "node_editor" with payload {handle: intptr(editor), name} — `handle` is the
+    //! unique id the live API targets. `widget_ident` (= the name) is macro-injected;
+    //! child nodes/pins/links nest under it. (Macro injects widget_prelude +
+    //! container_path_push/pop.)
+    imgui_node_editor::SetCurrentEditor(editor)
+    g_active_editor = unsafe(reinterpret<void?>(editor))
+    imgui_node_editor::Begin(widget_ident, size)
     invoke(blk)
     imgui_node_editor::End()
+    g_active_editor = null
     imgui_node_editor::SetCurrentEditor(null)
     var entry : WidgetEntry
-    entry.payload = JV((handle = intptr(ctx), name = name))
-    finalize_entity(name, "node_editor", entry)
-    container_path_pop()
+    entry.payload = JV((handle = intptr(editor), name = widget_ident))
+    finalize_entity(widget_ident, "node_editor", entry)
 }
 
 def set_node_position(ctx : imgui_node_editor::EditorContext?; id : NodeId; pos : float2) : bool {
@@ -75,71 +85,123 @@ def set_node_position(ctx : imgui_node_editor::EditorContext?; id : NodeId; pos 
     return true
 }
 
-// ===== graph entities (node / pin / link) — id-only, hand-unrolled =====
+// ===== graph entities (node / pin / link) — id-keyed via forward_argument =====
 //
-// Each takes ONLY an id — the editor's node/pin/link handle (internally a
-// pointer on the C++ side), so there's no bound struct and no app-side global
-// table. We hand-unroll what the [container] macro would inject (PushID via
-// widget_prelude + container_path_push/pop) instead of using the annotation,
-// precisely to drop the macro's auto-state-global + indexed-table requirement.
-// Registration is a per-frame entry whose payload is the id (+ bbox queried
-// from the editor for nodes); container_finalize with null (state_addr, ti)
-// keeps our hand-built payload (no reflection, no g_widgets meta to clobber it).
+// Each takes the editor's int id as the first arg, forwarded through the
+// [widget]/[container] macros' `forward_argument` mode: the macro injects
+// widget_prelude + (for containers) container_path_push/pop and a runtime path
+// key "{kind}_{id}". The editor owns the entity (no app-side state struct), so
+// rather than build a JsonValue per frame the body sets a lazy `serialize` hook
+// on the entry (editor handle + id); the payload is reconstructed only when a
+// snapshot is requested (widget_entry_jv), by querying the editor. node/pin are
+// containers (children nest under them); link is a leaf.
 
 def private finalize_entity(widget_ident : string; kind : string; var entry : WidgetEntry) {
-    //! Register a per-frame entry with a pre-built payload — null (addr, ti) so
-    //! the snapshot uses entry.payload verbatim instead of reflecting a struct.
+    //! Container finalize for a per-frame entry with a pre-built payload — null
+    //! (addr, ti) so the snapshot uses entry.payload verbatim. Keys off the
+    //! container chain (self already pushed by the macro prelude).
     container_finalize(widget_ident, kind, entry, null, null)
 }
 
-def node(id : NodeId; blk : block) {
-    //! A graph node — `node(id){…}`. `id` is the editor's node handle. Registers
-    //! as kind "node" with payload {id, bbox}; bbox is queried from the editor
-    //! (GetNodePosition/GetNodeSize) — the editor owns node geometry, not ImGui's
-    //! item rect. Child pins/text nest under this node's path.
-    let ident = "node_{id}"
-    widget_prelude(ident)
-    container_path_push(ident)
+def private finalize_entity_leaf(widget_ident : string; kind : string; var entry : WidgetEntry) {
+    //! Leaf (childless) finalize — widget_finalize keys off widget_path_key
+    //! (container chain + ident), so a leaf needs no self-push. (container_finalize
+    //! would key off the bare chain and collide with the parent's entry.)
+    widget_finalize(widget_ident, kind, entry, null, null)
+}
+
+// Lazy payload serializers (no-capture). Invoked only at snapshot time via the
+// WidgetEntry.serialize hook, never per frame. They re-derive everything from
+// (editor handle, id) — the editor is the source of truth for geometry,
+// selection and link topology, so nothing is stored per frame. Each brackets
+// SetCurrentEditor since the context isn't current outside the node_editor block
+// (same pattern as set_node_position).
+def private node_payload(ctx : void?; id : int) : JsonValue? {
+    let ed = unsafe(reinterpret<imgui_node_editor::EditorContext?>(ctx))
+    imgui_node_editor::SetCurrentEditor(ed)
+    let pos = imgui_node_editor::GetNodePosition(id)
+    let sz = imgui_node_editor::GetNodeSize(id)
+    let sel = imgui_node_editor::IsNodeSelected(id)
+    imgui_node_editor::SetCurrentEditor(null)
+    return JV((id = id, bbox = float4(pos.x, pos.y, pos.x + sz.x, pos.y + sz.y), selected = sel))
+}
+
+def private pin_payload(ctx : void?; id : int) : JsonValue? {
+    // No editor-queryable pin detail (no GetPinKind), so the payload is just the id.
+    return JV((id = id))
+}
+
+def private link_payload(ctx : void?; id : int) : JsonValue? {
+    let ed = unsafe(reinterpret<imgui_node_editor::EditorContext?>(ctx))
+    imgui_node_editor::SetCurrentEditor(ed)
+    var from_pin : PinId
+    var to_pin : PinId
+    imgui_node_editor::GetLinkPins(id, safe_addr(from_pin), safe_addr(to_pin))
+    let sel = imgui_node_editor::IsLinkSelected(id)
+    imgui_node_editor::SetCurrentEditor(null)
+    return JV((id = id, from_pin = from_pin, to_pin = to_pin, selected = sel))
+}
+
+[container(forward_argument=true)]
+def node(id : NodeId; color : float4 = float4(-1.0, -1.0, -1.0, -1.0); blk : block) {
+    //! A graph node — `node(id, (color = …)){…}`. `id` is the editor's node handle.
+    //! `color` tints the node body via PushStyleColor(StyleColor.NodeBg); pass a
+    //! negative color (e.g. float4(-1,-1,-1,-1)) to keep the editor default.
+    //! Registers as kind "node"; payload {id, bbox, selected} is built lazily at
+    //! snapshot (node_payload) by querying the editor — the editor owns node
+    //! geometry, not ImGui's item rect. entry.bbox is still set per frame for
+    //! click-targeting. Child pins/text nest under this node's path. `widget_ident`
+    //! is macro-injected (= "node_{id}").
+    let tinted = color.x >= 0.0
+    if (tinted) {
+        imgui_node_editor::PushStyleColor(StyleColor.NodeBg, color)
+    }
     imgui_node_editor::BeginNode(id)
     invoke(blk)
     imgui_node_editor::EndNode()
+    if (tinted) {
+        imgui_node_editor::PopStyleColor(1)
+    }
     var entry : WidgetEntry
     let pos = imgui_node_editor::GetNodePosition(id)
     let sz = imgui_node_editor::GetNodeSize(id)
     entry.bbox = float4(pos.x, pos.y, pos.x + sz.x, pos.y + sz.y)
-    entry.payload = JV((id = id, bbox = entry.bbox, selected = imgui_node_editor::IsNodeSelected(id)))
-    finalize_entity(ident, "node", entry)
-    container_path_pop()
+    entry.serialize_id = id
+    entry.serialize_ctx = g_active_editor
+    entry.serialize = @@node_payload
+    finalize_entity(widget_ident, "node", entry)
 }
 
+[container(forward_argument=true)]
 def pin(id : PinId; kind : PinKind; blk : block) {
-    //! A node pin — `pin(id, kind){…}`. Registers as kind "pin" with {id, kind}.
-    //! (imgui-node-editor exposes no pin-geometry query, so bbox stays empty.)
-    let ident = "pin_{id}"
-    widget_prelude(ident)
-    container_path_push(ident)
+    //! A node pin — `pin(id, kind){…}`. Registers as kind "pin"; payload {id} is
+    //! built lazily at snapshot (pin_payload). `kind` drives BeginPin but isn't
+    //! editor-queryable, so it's not in the payload. `widget_ident` is macro-injected
+    //! (= "pin_{id}").
     imgui_node_editor::BeginPin(id, kind)
     invoke(blk)
     imgui_node_editor::EndPin()
     var entry : WidgetEntry
-    entry.payload = JV((id = id, kind = "{kind}"))
-    finalize_entity(ident, "pin", entry)
-    container_path_pop()
+    entry.serialize_id = id
+    entry.serialize = @@pin_payload
+    finalize_entity(widget_ident, "pin", entry)
 }
 
+[widget(forward_argument=true)]
 def link(id : LinkId; from : PinId; to : PinId;
          color : float4 = float4(1.0, 1.0, 1.0, 1.0); thickness : float = 1.0) {
-    //! A graph edge — `link(id, from, to)`. Leaf (no body); the editor draws the
-    //! curve. Registers as kind "link" with {id, from_pin, to_pin}. Color/thickness
-    //! defaulted (the generated bind doesn't surface the C++ defaults).
-    let ident = "link_{id}"
-    widget_prelude(ident)
-    container_path_push(ident)
+    //! A graph edge — `link(id, (from=…, to=…))`. Leaf (no body); the editor draws
+    //! the curve. Registers as kind "link"; payload {id, from_pin, to_pin, selected}
+    //! is built lazily at snapshot (link_payload) via GetLinkPins/IsLinkSelected.
+    //! Color/thickness defaulted (the generated bind doesn't surface the C++
+    //! defaults) and overridable via the tuple. `widget_ident` is macro-injected
+    //! (= "link_{id}").
     imgui_node_editor::Link(id, from, to, color, thickness)
     var entry : WidgetEntry
-    entry.payload = JV((id = id, from_pin = from, to_pin = to, selected = imgui_node_editor::IsLinkSelected(id)))
-    finalize_entity(ident, "link", entry)
-    container_path_pop()
+    entry.serialize_id = id
+    entry.serialize_ctx = g_active_editor
+    entry.serialize = @@link_payload
+    finalize_entity_leaf(widget_ident, "link", entry)
 }
 
 // ===== link creation (queue-injectable; drivable via live) =====
