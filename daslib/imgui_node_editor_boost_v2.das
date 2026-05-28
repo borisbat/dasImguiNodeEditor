@@ -262,49 +262,56 @@ def reject_new_item(ctx : imgui_node_editor::EditorContext?) {
 
 // ===== item deletion (queue-injectable; drivable via live) =====
 //
-// begin_delete / query_deleted_link / query_deleted_node / accept_deleted_item /
-// reject_deleted_item mirror imgui-node-editor's BeginDelete/QueryDeleted*/Accept/
-// Reject, but each also serves a delete queued by enqueue_delete_node/_link. Unlike
-// create (a single offer repeated across frames), delete is a SINGLE-FRAME while-loop
-// enumeration — the native editor drops every candidate within the frame (it even
-// auto-rejects undecided ones). So the queue is pop-on-QUERY (not pop-on-decision):
-// query hands out one queued item and removes it, which advances the while-loop and
-// can't spin. accept/reject still differ in OUTCOME (apply the removal vs keep the
-// item) via g_delete_servicing, the flag set by the most recent query.
+// Links and nodes are FULLY DECOUPLED — each has its own queue, its own servicing
+// flag, and its own query/accept/reject wrapper. Same pop-on-DECISION shape as
+// create: query PEEKS the front of its kind's queue; accept/reject POP it (accept
+// also applies the deletion, reject just drops the request). The per-kind flag tells
+// accept/reject whether the current item is queued (pop our queue) or native (defer
+// to the editor), and lets query auto-drop a still-undecided prior item so the
+// while-loop always advances — mirroring imgui-node-editor's own auto-reject-on-
+// next-query (imgui_node_editor.cpp QueryItem).
 
 struct private PendingDelete {
-    editor  : uint64
-    id      : int
-    is_node : bool
+    editor : uint64
+    id     : int
 }
 
-var private g_pending_deletes : array<PendingDelete>
-var private g_delete_servicing : bool = false   // most recent query_deleted_* handed out a queued item
+var private g_link_deletes : array<PendingDelete>
+var private g_node_deletes : array<PendingDelete>
+var private g_link_delete_servicing : bool = false   // current query_deleted_link handed out a queued link
+var private g_node_delete_servicing : bool = false   // current query_deleted_node handed out a queued node
 
-def private has_pending_delete(h : uint64) : bool {
-    for (pd in g_pending_deletes) {
+def private dq_has(arr : array<PendingDelete>; h : uint64) : bool {
+    for (pd in arr) {
         return true if (pd.editor == h)
     }
     return false
 }
 
-def private pop_front_delete(h : uint64; want_node : bool; var out_id : int&) : bool {
-    for (i in range(length(g_pending_deletes))) {
-        let pd = g_pending_deletes[i]
-        if (pd.editor == h && pd.is_node == want_node) {
+def private dq_peek(arr : array<PendingDelete>; h : uint64; var out_id : int&) : bool {
+    for (pd in arr) {
+        if (pd.editor == h) {
             out_id = pd.id
-            g_pending_deletes |> erase(i)
             return true
         }
     }
     return false
 }
 
+def private dq_pop(var arr : array<PendingDelete>; h : uint64) {
+    for (i in range(length(arr))) {
+        if (arr[i].editor == h) {
+            arr |> erase(i)
+            return
+        }
+    }
+}
+
 def enqueue_delete_node(ctx : imgui_node_editor::EditorContext?; id : NodeId) : bool {
     //! Queue a node deletion to be replayed through `ctx`'s delete handler next frame
     //! (same path as a Delete-key press). Returns false for a null ctx or 0 id.
     return false if (ctx == null || id == 0)
-    g_pending_deletes |> push(PendingDelete(editor = intptr(ctx), id = id, is_node = true))
+    g_node_deletes |> push(PendingDelete(editor = intptr(ctx), id = id))
     return true
 }
 
@@ -312,27 +319,29 @@ def enqueue_delete_link(ctx : imgui_node_editor::EditorContext?; id : LinkId) : 
     //! Queue a link deletion to be replayed through `ctx`'s delete handler next frame.
     //! Returns false for a null ctx or 0 id.
     return false if (ctx == null || id == 0)
-    g_pending_deletes |> push(PendingDelete(editor = intptr(ctx), id = id, is_node = false))
+    g_link_deletes |> push(PendingDelete(editor = intptr(ctx), id = id))
     return true
 }
 
 def clear_pending_deletes(ctx : imgui_node_editor::EditorContext?) {
-    //! Drop all queued (not-yet-applied) deletions for `ctx`. Bulk/cancel flush.
+    //! Drop all queued (not-yet-applied) link AND node deletions for `ctx`. Bulk flush.
     return if (ctx == null)
     let h = intptr(ctx)
-    g_pending_deletes |> erase_if() $(pd) {
+    g_link_deletes |> erase_if() $(pd) {
+        return pd.editor == h
+    }
+    g_node_deletes |> erase_if() $(pd) {
         return pd.editor == h
     }
 }
 
 def begin_delete(ctx : imgui_node_editor::EditorContext?; blk : block) {
     //! Bracket BeginDelete/EndDelete for `ctx`. Invokes the body when the user pressed
-    //! Delete on a selection OR a queued deletion is pending. Inside, drain with the
-    //! query_deleted_link / query_deleted_node while-loops + accept_deleted_item /
-    //! reject_deleted_item — they serve queued deletions first, then native ones.
+    //! Delete on a selection OR a queued link/node deletion is pending. Inside, drain
+    //! with the query_deleted_link / query_deleted_node while-loops.
     let native = imgui_node_editor::BeginDelete()
     let h = intptr(ctx)
-    if (native || has_pending_delete(h)) {
+    if (native || dq_has(g_link_deletes, h) || dq_has(g_node_deletes, h)) {
         invoke(blk)
     }
     imgui_node_editor::EndDelete()
@@ -340,16 +349,19 @@ def begin_delete(ctx : imgui_node_editor::EditorContext?; blk : block) {
 
 def query_deleted_link(ctx : imgui_node_editor::EditorContext?; var lid : LinkId&) : bool {
     //! Inside begin_delete: report the next link being deleted (out-param by reference).
-    //! Hands out queued link deletions first (removing each — this advances the loop),
-    //! then falls through to the editor's native QueryDeletedLink.
+    //! PEEKS the front queued link delete (accept/reject pop it); auto-drops a prior
+    //! undecided one so the loop advances, then falls through to native QueryDeletedLink.
     let h = intptr(ctx)
+    if (g_link_delete_servicing) {
+        dq_pop(g_link_deletes, h)            // prior item left undecided → drop it (auto-reject)
+        g_link_delete_servicing = false
+    }
     var id = 0
-    if (pop_front_delete(h, false, id)) {
+    if (dq_peek(g_link_deletes, h, id)) {
         lid = id
-        g_delete_servicing = true
+        g_link_delete_servicing = true
         return true
     }
-    g_delete_servicing = false
     var x = 0
     let ok = imgui_node_editor::QueryDeletedLink(safe_addr(x), null, null)
     lid = x
@@ -357,35 +369,66 @@ def query_deleted_link(ctx : imgui_node_editor::EditorContext?; var lid : LinkId
 }
 
 def query_deleted_node(ctx : imgui_node_editor::EditorContext?; var nid : NodeId&) : bool {
-    //! Inside begin_delete: report the next node being deleted. Hands out queued node
-    //! deletions first (removing each), then the editor's native QueryDeletedNode.
+    //! Inside begin_delete: report the next node being deleted. PEEKS the front queued
+    //! node delete; auto-drops a prior undecided one, then native QueryDeletedNode.
     let h = intptr(ctx)
+    if (g_node_delete_servicing) {
+        dq_pop(g_node_deletes, h)
+        g_node_delete_servicing = false
+    }
     var id = 0
-    if (pop_front_delete(h, true, id)) {
+    if (dq_peek(g_node_deletes, h, id)) {
         nid = id
-        g_delete_servicing = true
+        g_node_delete_servicing = true
         return true
     }
-    g_delete_servicing = false
     var x = 0
     let ok = imgui_node_editor::QueryDeletedNode(safe_addr(x))
     nid = x
     return ok
 }
 
-def accept_deleted_item(ctx : imgui_node_editor::EditorContext?; delete_dependencies : bool = true) : bool {
-    //! Inside begin_delete, after a query: accept the deletion (true => app removes it
-    //! from its graph). Always true for a queued deletion (already dequeued); else
-    //! defers to the editor's AcceptDeletedItem.
-    return true if (g_delete_servicing)
+def accept_deleted_link(ctx : imgui_node_editor::EditorContext?) : bool {
+    //! Inside begin_delete, after query_deleted_link: accept the deletion (true => app
+    //! removes the link). Pops the queued link when injecting, else AcceptDeletedItem.
+    if (g_link_delete_servicing) {
+        dq_pop(g_link_deletes, intptr(ctx))
+        g_link_delete_servicing = false
+        return true
+    }
+    return imgui_node_editor::AcceptDeletedItem(true)
+}
+
+def reject_deleted_link(ctx : imgui_node_editor::EditorContext?) {
+    //! Inside begin_delete, after query_deleted_link: refuse the deletion (app keeps the
+    //! link). Pops the queued link (drops the request) when injecting, else RejectDeletedItem.
+    if (g_link_delete_servicing) {
+        dq_pop(g_link_deletes, intptr(ctx))
+        g_link_delete_servicing = false
+        return
+    }
+    imgui_node_editor::RejectDeletedItem()
+}
+
+def accept_deleted_node(ctx : imgui_node_editor::EditorContext?; delete_dependencies : bool = true) : bool {
+    //! Inside begin_delete, after query_deleted_node: accept the deletion (true => app
+    //! removes the node). Pops the queued node when injecting, else AcceptDeletedItem.
+    if (g_node_delete_servicing) {
+        dq_pop(g_node_deletes, intptr(ctx))
+        g_node_delete_servicing = false
+        return true
+    }
     return imgui_node_editor::AcceptDeletedItem(delete_dependencies)
 }
 
-def reject_deleted_item(ctx : imgui_node_editor::EditorContext?) {
-    //! Inside begin_delete, after a query: refuse the deletion (app keeps the item). A
-    //! queued deletion is already dequeued, so this just declines to apply it; for a
-    //! native delete it calls the editor's RejectDeletedItem.
-    return if (g_delete_servicing)
+def reject_deleted_node(ctx : imgui_node_editor::EditorContext?) {
+    //! Inside begin_delete, after query_deleted_node: refuse the deletion (app keeps the
+    //! node). Pops the queued node (drops the request) when injecting, else RejectDeletedItem.
+    if (g_node_delete_servicing) {
+        dq_pop(g_node_deletes, intptr(ctx))
+        g_node_delete_servicing = false
+        return
+    }
     imgui_node_editor::RejectDeletedItem()
 }
 

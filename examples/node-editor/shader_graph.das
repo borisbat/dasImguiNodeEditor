@@ -216,13 +216,13 @@ def draw_editor(var g : Graph) {
         begin_delete(g_ed) {
             var lid = 0
             while (query_deleted_link(g_ed, lid)) {
-                if (accept_deleted_item(g_ed)) {
+                if (accept_deleted_link(g_ed)) {
                     g.links |> erase(lid)
                 }
             }
             var nid = 0
             while (query_deleted_node(g_ed, nid)) {
-                if (accept_deleted_item(g_ed)) {
+                if (accept_deleted_node(g_ed)) {
                     remove_node(g, nid)
                 }
             }
