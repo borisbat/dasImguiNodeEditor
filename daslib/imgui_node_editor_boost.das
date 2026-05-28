@@ -5,6 +5,11 @@ options no_unused_function_arguments = false
 
 module imgui_node_editor_boost shared
 
+// Legacy v1 boost — thin Begin*/End* block wrappers + no-context selection helpers.
+// Superseded by `imgui_node_editor_boost_v2` (telemetry-aware, app-owned editor
+// context, queue-injectable create/delete). Kept as-is for back-compat; new code
+// should require `imgui/imgui_node_editor_boost_v2`.
+
 require imgui public
 require imgui_node_editor public
 

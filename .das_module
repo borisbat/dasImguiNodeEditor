@@ -7,4 +7,7 @@ def initialize(project_path : string) {
         register_dynamic_module("{project_path}/dasModuleImguiNodeEditor.shared_module", "Module_dasIMGUI_NODE_EDITOR")
     }
     register_native_path("imgui", "imgui_node_editor_boost", "{project_path}/daslib/imgui_node_editor_boost.das")
+    register_native_path("imgui", "imgui_node_editor_boost_v2", "{project_path}/daslib/imgui_node_editor_boost_v2.das")
+    register_native_path("imgui", "imgui_node_editor_live", "{project_path}/daslib/imgui_node_editor_live.das")
+    register_native_path("imgui", "imgui_node_editor_app", "{project_path}/daslib/imgui_node_editor_app.das")
 }
