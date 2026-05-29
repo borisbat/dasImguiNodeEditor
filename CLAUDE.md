@@ -111,9 +111,21 @@ editor id that crosses the live/JSON boundary; `handle_to_editor(uint64)` revers
   `node_payload`). All bracket `SetCurrentEditor` (callable outside the draw loop); the
   navigation pair may share `NavigateToContent`'s DPI quirk (Gotchas #5).
 - **Rendering config:** `with_style_var(StyleVar, value){…}` (float/float2/float4 overloads)
-  brackets PushStyleVar/PopStyleVar. `with_node_background_drawlist(id) $(var dl){…}` hands a
-  node's background draw list for custom art — **call it AFTER the node()/group() block**, not
-  inside (Gotchas #8).
+  brackets PushStyleVar/PopStyleVar; `with_style_color(StyleColor, color){…}` is its color peer
+  (PushStyleColor/PopStyleColor — use it for any slot beyond NodeBg, which `node()`'s `color` arg
+  already covers). `with_node_background_drawlist(id) $(var dl){…}` hands a node's background draw
+  list for custom art — **call it AFTER the node()/group() block**, not inside (Gotchas #8).
+  `group_hint(id) $(var fg; var bg) : bool` draws an off-screen group-label overlay; it self-gates
+  (returns false / block skipped unless the canvas is zoomed out and `id` is a group), so call it
+  unconditionally per group. Must run inside `node_editor()`, NOT inside `with_suspended`. The hint
+  draw lists swap R/B for asymmetric colors — use near-grey label tints (Gotchas #10).
+- **Theme:** `require imgui/imgui_node_editor_theme_daslang` → `apply_daslang_node_editor_style(ctx)`
+  paints the canvas (`ed::Style`) warm-dark + amber to match the ImGui `apply_daslang_theme`. Call
+  once after `create_node_editor`. The ImGui theme alone does NOT touch the canvas (node-editor keeps
+  a separate `ed::Style`).
+- **Per-pin geometry:** `pin()` takes `pivot_alignment` / `pivot_size` / `pivot_scale` (each
+  sentinel `x < 0` = keep editor default) → PinPivotAlignment/Size/Scale, placing + sizing the
+  link-attach point.
 - **Context menus are EVENTS, not scopes** (see Gotchas): `with_suspended() { … }` brackets
   Suspend/Resume (screen space), and inside it `show_node_context_menu(ctx, var nid&)` /
   `show_pin_context_menu(ctx, var pid&)` / `show_link_context_menu(ctx, var lid&)` /
@@ -191,3 +203,8 @@ stale `daslang`/`daslang-live`/`dastest` procs between runs (port 9090 reuse). C
    The node-editor group entity is `node_group` — defining a `group` here is `error[30607]
    ambiguous_macro`. Same rule for any future entity whose natural name collides with a dasImgui
    widget/container macro: prefix it (`node_*`).
+10. **Group-hint draw lists swap R/B for asymmetric colors.** Inside `group_hint(id)`, art drawn
+    into the foreground/background hint draw lists comes out with R and B channels swapped vs
+    `rgba()`'s packing (amber `(232,161,58)` renders blue) — a vendored color-format quirk in the
+    hint splitter path. Near-grey tints are swap-invariant; the example labels groups in cream.
+    `GetGroupMin`/`GetGroupMax` inside a hint are SCREEN-space (not canvas-space).

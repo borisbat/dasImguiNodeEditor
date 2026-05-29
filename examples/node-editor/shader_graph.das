@@ -10,6 +10,7 @@ options gen2
 require imgui/imgui_harness
 require imgui/imgui_node_editor_boost_v2
 require imgui/imgui_node_editor_live
+require imgui/imgui_node_editor_theme_daslang
 require daslib/json
 require daslib/json_boost
 
@@ -320,7 +321,9 @@ def render_node_body(n : Node) {
         }
     }
     for (p in n.outputs) {
-        pin(p.id, (kind = PinKind.Output, pivot_alignment = float2(1.0, 0.5))) {
+        // pivot_scale enlarges the output pin's attach area a touch (the third pivot knob,
+        // alongside alignment + size) so links spring from a slightly wider anchor.
+        pin(p.id, (kind = PinKind.Output, pivot_alignment = float2(1.0, 0.5), pivot_scale = float2(1.25, 1.25))) {
             text(PIN_LABEL[p.id], (text = "{p.name} ->"))
         }
     }
@@ -342,6 +345,20 @@ def draw_editor() {
                 text(GROUP_TITLE[gr.id], (text = gr.title))
             }
         }
+        // Off-screen group labels: when the canvas is zoomed out (scale <= 0.75) the editor
+        // renders a hint overlay so group names stay readable. group_hint self-gates (no-op
+        // at normal zoom), so the loop is unconditional. Drawn into the hint draw lists,
+        // positioned at the group's canvas bounds (GetGroupMin — an allow-listed read).
+        for (gr in values(g_graph.groups)) {
+            group_hint(gr.id) $(var fg; var _bg) {
+                // Float the group title above the group bounds (GetGroupMin is in screen space
+                // inside a hint). _bg is the background hint list — unused here, exposed for
+                // callers that want art drawn behind the group. NB: the hint draw lists swap
+                // R/B for asymmetric colors, so use a near-grey (swap-invariant) label tint.
+                let mn = imgui_node_editor::GetGroupMin()
+                fg |> add_text(float2(mn.x + 4.0, mn.y - 18.0), rgba(232u, 226u, 210u, 255u), gr.title)
+            }
+        }
         for (n in values(g_graph.nodes)) {
             // Seed the initial position ONCE. After that the editor owns it
             // (user drags, move_node command) — we never re-push from Node.pos.
@@ -350,10 +367,13 @@ def draw_editor() {
             }
             if (n.kind == NodeKind.ColorOutput) {
                 // The output node showcases per-node rendering config: rounded corners via
-                // a scoped style var.
+                // a scoped style var, plus an amber border via a scoped style color (the two
+                // compose — with_style_color is the color peer of with_style_var).
                 with_style_var(imgui_node_editor::StyleVar.NodeRounding, 10.0) {
-                    node(n.id, (color = node_tint(n.kind))) {
-                        render_node_body(n)
+                    with_style_color(imgui_node_editor::StyleColor.NodeBorder, float4(0.910, 0.631, 0.227, 1.0)) {
+                        node(n.id, (color = node_tint(n.kind))) {
+                            render_node_body(n)
+                        }
                     }
                 }
                 // A custom accent stripe on its own background draw list — drawn AFTER the
@@ -495,6 +515,7 @@ def draw_editor() {
 def init() {
     harness_init("Shader Graph — node editor", 1280, 720)
     g_ed = create_node_editor()
+    apply_daslang_node_editor_style(g_ed)    // warm-dark + amber canvas to match the daslang ImGui theme
     build_sample_graph(g_graph)
 }
 
