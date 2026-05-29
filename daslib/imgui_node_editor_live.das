@@ -33,6 +33,13 @@ def select_node_cmd(input : JsonValue?) : JsonValue? {
     return JV("select node {id} = {on}")
 }
 
+[live_command(description = "Clear all selection in an editor: input editor (handle).")]
+def clear_selection_cmd(input : JsonValue?) : JsonValue? {
+    let handle = input?["editor"] ?? uint64(0)
+    clear_selection(handle_to_editor(handle))
+    return JV("cleared selection")
+}
+
 [live_command(description = "Select/deselect a link: input editor (handle), id, on (bool).")]
 def select_link_cmd(input : JsonValue?) : JsonValue? {
     let handle = input?["editor"] ?? uint64(0)
@@ -153,4 +160,27 @@ def ordered_node_ids_cmd(input : JsonValue?) : JsonValue? {
     var arr = JV(ids)    // copies the ids into a fresh JSON array — ids can be freed after
     delete ids
     return JV((count = n, ids = arr))
+}
+
+[live_command(description = "Inject a clipboard/edit shortcut to be served next frame: input editor (handle), kind (\"cut\"|\"copy\"|\"paste\"|\"duplicate\"|\"create_node\"). Replays through the app's accept handler exactly as a real chord.")]
+def shortcut_cmd(input : JsonValue?) : JsonValue? {
+    let handle = input?["editor"] ?? uint64(0)
+    let kind = input?["kind"] ?? ""
+    return JV("queued shortcut {kind}") if (enqueue_shortcut(handle_to_editor(handle), kind))
+    return JV("not queued (null editor or unknown kind)")
+}
+
+[live_command(description = "Clear all queued (not-yet-served) shortcuts for an editor: input editor (handle).")]
+def clear_pending_shortcuts_cmd(input : JsonValue?) : JsonValue? {
+    let handle = input?["editor"] ?? uint64(0)
+    clear_pending_shortcuts(handle_to_editor(handle))
+    return JV("cleared pending shortcuts")
+}
+
+[live_command(description = "Enable/disable clipboard/edit key chords for an editor: input editor (handle), on (bool).")]
+def enable_shortcuts_cmd(input : JsonValue?) : JsonValue? {
+    let handle = input?["editor"] ?? uint64(0)
+    let on = input?["on"] ?? true
+    return JV("shortcuts enabled = {on}") if (enable_shortcuts(handle_to_editor(handle), on))
+    return JV("not set (null editor)")
 }

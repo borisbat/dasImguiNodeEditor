@@ -134,6 +134,20 @@ editor id that crosses the live/JSON boundary; `handle_to_editor(uint64)` revers
   `last_context_kind` + `last_*_context_menu` for frames to come). The app decides what to
   render in response (a `popup_window`, a button, anything) — the boost owns telemetry, the
   app owns rendering.
+- **Clipboard / edit shortcuts are EVENTS** (same shape as context menus): shortcuts are ON by
+  default (`create_node_editor`; toggle with `enable_shortcuts(ctx, on)`). `with_shortcuts(ctx) { … }`
+  brackets BeginShortcut/EndShortcut (run it INSIDE `node_editor()`, NOT inside `with_suspended`);
+  inside, branch on `accept_copy` / `accept_cut` / `accept_paste` / `accept_duplicate` /
+  `accept_create_node` (each true the frame that chord fired, records `last_shortcut_action` +
+  `last_shortcut_context_size` on the editor). The editor owns NO clipboard content — the app
+  serializes the target set (`get_action_context_nodes(ctx)` / `…_links`, or its selection) on
+  copy/cut and recreates on paste; topology stays app-owned. `enqueue_shortcut(ctx, kind)` (kind ∈
+  cut/copy/paste/duplicate/create_node) + `clear_pending_shortcuts` replay a shortcut through the
+  same accept handler a real chord hits — the drivable/testable rail (native key-chord synth is
+  finicky; injection is deterministic). The `accept_*` only flag the action — do the actual
+  clipboard work AFTER the `node_editor()` block (bracketed `get_selected_nodes`/`spawn`/`select`
+  null the current editor mid-frame; see the demo's `handle_shortcut_action`, the flag-then-act
+  pattern shared with `g_request_navigate`).
 
 ## Live commands (`imgui_node_editor_live`)
 
@@ -141,7 +155,8 @@ Project-agnostic — target any graph by `editor` handle (`intptr(ctx)` from the
 entity id: `move_node`, `select_node_cmd`, `select_link_cmd`, `add_link_cmd`,
 `clear_pending_links_cmd`, `delete_node_cmd`, `delete_link_cmd`, `clear_pending_deletes_cmd`,
 `new_node_drag_cmd`, `flow_cmd`, `center_node_cmd`, `navigate_to_selection_cmd`,
-`restore_node_state_cmd`, `set_node_z_cmd`, `set_group_size_cmd`, `ordered_node_ids_cmd`.
+`restore_node_state_cmd`, `set_node_z_cmd`, `set_group_size_cmd`, `ordered_node_ids_cmd`,
+`clear_selection_cmd`, `shortcut_cmd`, `clear_pending_shortcuts_cmd`, `enable_shortcuts_cmd`.
 For synth mouse/keyboard use dasImgui's commands — prefer the high-level
 `imgui_mouse_click_at {x, y, button}` (button `1` = right-click) and `set_user_control
 {enabled:false/true}` to cleanly own input during automation.
@@ -208,3 +223,11 @@ stale `daslang`/`daslang-live`/`dastest` procs between runs (port 9090 reuse). C
     `rgba()`'s packing (amber `(232,161,58)` renders blue) — a vendored color-format quirk in the
     hint splitter path. Near-grey tints are swap-invariant; the example labels groups in cream.
     `GetGroupMin`/`GetGroupMax` inside a hint are SCREEN-space (not canvas-space).
+11. **`GetActionContextSize` ≠ the action's id lists under injection.** `GetActionContextSize`
+    reads the editor's internal `m_Context`, populated only when a REAL chord ran (0 under the
+    `enqueue_shortcut` injection rail), whereas `GetActionContextNodes`/`Links` read
+    `GetSelectedObjects` (populated either way). The wrappers source the action's target set
+    uniformly from the SELECTION (`GetSelectedObjectCount`) so `last_shortcut_context_size` +
+    `get_action_context_nodes/links` agree for both real and injected actions. The accept_* must
+    run with the editor current (inside `node_editor()`); the actual clipboard work goes AFTER the
+    block (bracketed selection/spawn helpers would null the current editor mid-frame).
