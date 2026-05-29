@@ -69,6 +69,16 @@ var g_ctx_link : int = 0                               // link under a right-cli
 var g_ctx_pos  : float2                                // canvas pos to place a context-menu-created node
 var g_drag_from_pin : int = 0                          // source pin of a node-by-drag; 0 = plain right-click (no auto-connect)
 var g_last_link : int = 0                              // most-recently connected link — auto-flows each frame (draw_editor)
+var g_shortcut_action = ""                             // clipboard shortcut accepted this frame; handled AFTER the node_editor block
+
+// App-owned clipboard. The editor owns no clipboard content — accept_copy/cut just say
+// "a copy happened"; the app captures the selected node KINDS here (positions are not
+// preserved — paste cascades like the toolbar). Kinds+titles are enough to recreate.
+struct ClipEntry {
+    kind  : NodeKind
+    title : string
+}
+var g_clipboard : array<ClipEntry>
 
 // Per-id NarrativeState slots for the loop-rendered title / pin-name text().
 // The plain text("foo") form shares ONE state global per source line, so every
@@ -435,6 +445,22 @@ def draw_editor() {
             }
         }
 
+        // Clipboard / edit shortcuts (Ctrl+C/X/V/D — on by default per create_node_editor).
+        // accept_* only flags the action here (editor is current); the actual copy/paste runs
+        // AFTER the block (handle_shortcut_action) where the bracketed selection/spawn helpers
+        // are safe. Mirrors the g_request_navigate flag-then-act pattern.
+        with_shortcuts(g_ed) {
+            if (accept_copy(g_ed)) {
+                g_shortcut_action = "copy"
+            } elif (accept_cut(g_ed)) {
+                g_shortcut_action = "cut"
+            } elif (accept_paste(g_ed)) {
+                g_shortcut_action = "paste"
+            } elif (accept_duplicate(g_ed)) {
+                g_shortcut_action = "duplicate"
+            }
+        }
+
         // Right-click context menus. Detection + popups run in a Suspend/Resume
         // island (screen space) per imgui-node-editor: background → create a node
         // of the chosen kind at the cursor; node/link → delete.
@@ -507,6 +533,58 @@ def draw_editor() {
     if (g_last_link != 0) {
         flow(g_ed, g_last_link)
     }
+    // Apply any clipboard shortcut accepted this frame — here, post-block, the bracketed
+    // get_selected_nodes / set_node_position / select_node helpers are safe to call.
+    handle_shortcut_action(g_ed)
+}
+
+// ===== clipboard / shortcuts (app owns the clipboard content) =====
+
+def clipboard_copy(ctx : imgui_node_editor::EditorContext?) {
+    // Capture the selected nodes' kinds (paste cascades — positions aren't preserved).
+    var sel <- get_selected_nodes(ctx)
+    g_clipboard |> clear()
+    for (nid in sel) {
+        if (key_exists(g_graph.nodes, nid)) {
+            // kind + title are copyable scalars; two reads (no insert → no rehash).
+            let knd = g_graph.nodes[nid].kind
+            let ttl = g_graph.nodes[nid].title
+            g_clipboard |> push(ClipEntry(kind = knd, title = ttl))
+        }
+    }
+    delete sel
+}
+
+def clipboard_paste(ctx : imgui_node_editor::EditorContext?) {
+    // Recreate each clipboard entry at a cascade offset, selecting the pasted nodes (so a
+    // follow-up paste/duplicate chains off the new selection).
+    clear_selection(ctx)
+    for (ce in g_clipboard) {
+        let pos = float2(480.0 + float(g_spawn % 6) * 28.0, 380.0 + float(g_spawn % 6) * 28.0)
+        g_spawn = g_spawn + 1
+        let nid = spawn_node(g_graph, ce.kind, pos)
+        set_node_position(ctx, nid, pos)
+        select_node(ctx, nid, true)
+    }
+}
+
+def handle_shortcut_action(ctx : imgui_node_editor::EditorContext?) {
+    if (g_shortcut_action == "copy") {
+        clipboard_copy(ctx)
+    } elif (g_shortcut_action == "cut") {
+        clipboard_copy(ctx)
+        var sel <- get_selected_nodes(ctx)
+        for (nid in sel) {
+            remove_node(g_graph, nid)
+        }
+        delete sel
+    } elif (g_shortcut_action == "paste") {
+        clipboard_paste(ctx)
+    } elif (g_shortcut_action == "duplicate") {
+        clipboard_copy(ctx)
+        clipboard_paste(ctx)
+    }
+    g_shortcut_action = ""
 }
 
 // ===== app lifecycle =====

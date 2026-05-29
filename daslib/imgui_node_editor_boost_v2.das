@@ -53,6 +53,18 @@ struct private NodeDragState {
 }
 var private g_node_drags : table<uint64; NodeDragState>
 
+// Last shortcut action per editor — which clipboard/edit shortcut the editor accepted
+// this frame (Ctrl+C/X/V/D, etc.). accept_* records it HERE (the events-record-telemetry
+// rule, same as CtxMenuState); surfaced in node_editor_payload as last_shortcut_*. Scalar
+// (copyable) — the action name + the size of its target set (= the selection the action
+// applies to; GetSelectedObjectCount, consistent for real + injected actions). The full
+// id lists are read via get_action_context_nodes/links (callable outside the frame).
+struct private ShortcutState {
+    action       : string = ""   //! "" | "cut" | "copy" | "paste" | "duplicate" | "create_node"
+    context_size : int = 0       //! # objects (nodes + links) the action targets
+}
+var private g_shortcuts : table<uint64; ShortcutState>
+
 // Active editor for the currently-open node_editor() block, set for its duration
 // (stored as void? — it only flows into WidgetEntry.serialize_ctx). node/pin/link
 // stash it so their lazy snapshot serializers can SetCurrentEditor before querying
@@ -70,8 +82,23 @@ def create_node_editor() : imgui_node_editor::EditorContext? {
     //! Create an editor context with NodeEditor.json persistence disabled (custom
     //! binding — Config.SettingsFile is const in the generated bind). The app owns
     //! the handle: pass it to node_editor()/set_node_position(), free it with
-    //! destroy_node_editor(). An app may own several (one per graph).
-    return imgui_node_editor::CreateEditorNoSettings()
+    //! destroy_node_editor(). An app may own several (one per graph). Clipboard/edit
+    //! shortcuts (Ctrl+C/X/V/D) are ENABLED by default — consume them via with_shortcuts;
+    //! call enable_shortcuts(ctx, false) to opt out.
+    var ctx = imgui_node_editor::CreateEditorNoSettings()
+    enable_shortcuts(ctx, true)
+    return ctx
+}
+
+def enable_shortcuts(ctx : imgui_node_editor::EditorContext?; on : bool) : bool {
+    //! Toggle whether `ctx` processes clipboard/edit key chords (Ctrl+C/X/V/D, …). On by
+    //! default from create_node_editor. Brackets SetCurrentEditor (callable outside the
+    //! draw loop). No-op for a null ctx.
+    return false if (ctx == null)
+    imgui_node_editor::SetCurrentEditor(ctx)
+    imgui_node_editor::EnableShortcuts(on)
+    imgui_node_editor::SetCurrentEditor(null)
+    return true
 }
 
 def destroy_node_editor(ctx : imgui_node_editor::EditorContext?) {
@@ -243,6 +270,10 @@ def private node_editor_payload(ctx : void?; id : int) : JsonValue? {
     if (key_exists(g_node_drags, h)) {
         nd = g_node_drags[h]
     }
+    var sc = ShortcutState()
+    if (key_exists(g_shortcuts, h)) {
+        sc = g_shortcuts[h]
+    }
     return JV((
         handle = h,
         last_context_kind = cm.kind,
@@ -251,7 +282,9 @@ def private node_editor_payload(ctx : void?; id : int) : JsonValue? {
         last_link_context_menu = cm.link,
         last_background_context_menu = cm.pos,
         last_new_node_drag_from_pin = nd.from_pin,
-        last_new_node_drag_pos = nd.pos
+        last_new_node_drag_pos = nd.pos,
+        last_shortcut_action = sc.action,
+        last_shortcut_context_size = sc.context_size
     ))
 }
 
@@ -970,4 +1003,176 @@ def show_link_context_menu(ctx : imgui_node_editor::EditorContext?; var lid : Li
         record_ctx_menu(ctx, CtxMenuState(kind = "link", link = x))
     }
     return ok
+}
+
+// ===== clipboard / edit shortcuts (events; queue-injectable; drivable via live) =====
+//
+// The editor detects the key chords itself (Ctrl+C/X/V/D, …) when shortcuts are enabled;
+// at most one action is current per frame. The contract is a strict scope: only inside a
+// true BeginShortcut()/EndShortcut() may the Accept* be called (each ASSERTS m_InAction).
+// with_shortcuts brackets that scope; accept_<kind> is the event (true iff that action
+// fired), records it on the editor (ShortcutState telemetry), and ALSO serves an injected
+// shortcut (enqueue_shortcut) so a live command / test can drive copy/paste deterministically
+// without synthesizing keystrokes — the wrapper makes accept_<kind> return true, replaying
+// through the SAME app handler the chord drives. The editor owns no clipboard CONTENT: the
+// app serializes the target set (get_action_context_nodes/links or its selection) on copy and
+// recreates on paste — topology stays app-owned, exactly like deletes.
+
+let private SHORTCUT_KINDS : table<string> <- { "cut", "copy", "paste", "duplicate", "create_node" }
+
+struct private PendingShortcut {
+    editor : uint64
+    kind   : string
+}
+var private g_pending_shortcuts : array<PendingShortcut>
+var private g_shortcut_native : table<uint64; bool>   // did BeginShortcut() return true this frame?
+
+def private sc_has_pending(h : uint64) : bool {
+    for (ps in g_pending_shortcuts) {
+        return true if (ps.editor == h)
+    }
+    return false
+}
+
+def private sc_pop_if(h : uint64; kind : string) : bool {
+    for (i in range(length(g_pending_shortcuts))) {
+        if (g_pending_shortcuts[i].editor == h && g_pending_shortcuts[i].kind == kind) {
+            g_pending_shortcuts |> erase(i)
+            return true
+        }
+    }
+    return false
+}
+
+def private record_shortcut(ctx : imgui_node_editor::EditorContext?; kind : string) {
+    // Editor is current here (accept_* runs inside the node_editor block). The action's
+    // target set IS the selection (GetActionContextNodes/Links read GetSelectedObjects);
+    // GetSelectedObjectCount is the uniform source — GetActionContextSize reads m_Context,
+    // which is only populated for a REAL chord (0 under injection).
+    g_shortcuts[intptr(ctx)] = ShortcutState(action = kind, context_size = imgui_node_editor::GetSelectedObjectCount())
+}
+
+def private sc_take(ctx : imgui_node_editor::EditorContext?; h : uint64; kind : string; native_ok : bool) : bool {
+    // Injected wins; native_ok is pre-guarded by the caller (AcceptX() only evaluated when
+    // BeginShortcut() was true this frame, so the m_InAction assert can't trip).
+    if (sc_pop_if(h, kind) || native_ok) {
+        record_shortcut(ctx, kind)
+        return true
+    }
+    return false
+}
+
+def with_shortcuts(ctx : imgui_node_editor::EditorContext?; blk : block) {
+    //! Bracket BeginShortcut/EndShortcut for `ctx`. Invokes the body when the editor accepted
+    //! a clipboard/edit chord this frame OR a shortcut is queued (enqueue_shortcut). Inside,
+    //! branch on accept_copy / accept_cut / accept_paste / accept_duplicate / accept_create_node.
+    //! Must run INSIDE the node_editor() block (the editor must be current), NOT inside
+    //! with_suspended. Shortcuts must be enabled (on by default; see enable_shortcuts).
+    let native = imgui_node_editor::BeginShortcut()
+    let h = intptr(ctx)
+    g_shortcut_native[h] = native
+    if (native || sc_has_pending(h)) {
+        invoke(blk)
+    }
+    if (native) {
+        imgui_node_editor::EndShortcut()
+    }
+}
+
+def accept_copy(ctx : imgui_node_editor::EditorContext?) : bool {
+    //! Inside with_shortcuts: true the frame a Copy fired (or a queued "copy" is served).
+    //! Records {action:"copy"} on the editor. Respond by serializing the target set
+    //! (get_action_context_nodes/links, or the app's selection) into the app's clipboard.
+    let h = intptr(ctx)
+    return sc_take(ctx, h, "copy", (g_shortcut_native?[h] ?? false) && imgui_node_editor::AcceptCopy())
+}
+
+def accept_cut(ctx : imgui_node_editor::EditorContext?) : bool {
+    //! Inside with_shortcuts: true on a Cut. Records {action:"cut"}. Respond by copying the
+    //! target set to the clipboard AND deleting it (via the app's delete path).
+    let h = intptr(ctx)
+    return sc_take(ctx, h, "cut", (g_shortcut_native?[h] ?? false) && imgui_node_editor::AcceptCut())
+}
+
+def accept_paste(ctx : imgui_node_editor::EditorContext?) : bool {
+    //! Inside with_shortcuts: true on a Paste. Records {action:"paste"}. Respond by recreating
+    //! the app's clipboard contents as new nodes/links.
+    let h = intptr(ctx)
+    return sc_take(ctx, h, "paste", (g_shortcut_native?[h] ?? false) && imgui_node_editor::AcceptPaste())
+}
+
+def accept_duplicate(ctx : imgui_node_editor::EditorContext?) : bool {
+    //! Inside with_shortcuts: true on a Duplicate. Records {action:"duplicate"}. Respond by
+    //! cloning the target set in place (a self-contained copy+paste, no clipboard needed).
+    let h = intptr(ctx)
+    return sc_take(ctx, h, "duplicate", (g_shortcut_native?[h] ?? false) && imgui_node_editor::AcceptDuplicate())
+}
+
+def accept_create_node(ctx : imgui_node_editor::EditorContext?) : bool {
+    //! Inside with_shortcuts: true on a CreateNode shortcut. Records {action:"create_node"}.
+    //! Respond by opening the app's create-node UI.
+    let h = intptr(ctx)
+    return sc_take(ctx, h, "create_node", (g_shortcut_native?[h] ?? false) && imgui_node_editor::AcceptCreateNode())
+}
+
+def enqueue_shortcut(ctx : imgui_node_editor::EditorContext?; kind : string) : bool {
+    //! Queue a shortcut to be served on `ctx`'s next frame — `kind` in {"cut","copy","paste",
+    //! "duplicate","create_node"}. with_shortcuts replays it through the app's accept_<kind>
+    //! handler exactly as a real chord, so copy/paste is drivable/testable without keystrokes.
+    //! Returns false for a null ctx or an unknown kind. Queue what your app actually handles —
+    //! an unhandled kind lingers (flush with clear_pending_shortcuts).
+    return false if (ctx == null || !key_exists(SHORTCUT_KINDS, kind))
+    g_pending_shortcuts |> push(PendingShortcut(editor = intptr(ctx), kind = kind))
+    return true
+}
+
+def clear_pending_shortcuts(ctx : imgui_node_editor::EditorContext?) {
+    //! Drop all queued (not-yet-served) shortcuts for `ctx`.
+    return if (ctx == null)
+    let h = intptr(ctx)
+    g_pending_shortcuts |> erase_if() $(ps) {
+        return ps.editor == h
+    }
+}
+
+def get_action_context_nodes(ctx : imgui_node_editor::EditorContext?) : array<NodeId> {
+    //! The node ids the current shortcut action applies to (the selected nodes). Safe outside
+    //! the draw loop (brackets SetCurrentEditor); same out-buffer pattern as get_selected_nodes.
+    var result : array<NodeId>
+    return <- result if (ctx == null)
+    imgui_node_editor::SetCurrentEditor(ctx)
+    let count = imgui_node_editor::GetSelectedObjectCount()   // capacity: GetActionContextNodes filters the selection
+    if (count > 0) {
+        var buf : array<void?>
+        buf |> resize(count)
+        var n = 0
+        unsafe {
+            n = imgui_node_editor::GetActionContextNodes(reinterpret<NodeId?>(addr(buf[0])), count)
+        }
+        result <- [for (i in range(n)); NodeId(intptr(buf[i]))]
+        delete buf
+    }
+    imgui_node_editor::SetCurrentEditor(null)
+    return <- result
+}
+
+def get_action_context_links(ctx : imgui_node_editor::EditorContext?) : array<LinkId> {
+    //! The link ids the current shortcut action applies to (the selected links). Same
+    //! bracketing + out-buffer pattern as get_action_context_nodes.
+    var result : array<LinkId>
+    return <- result if (ctx == null)
+    imgui_node_editor::SetCurrentEditor(ctx)
+    let count = imgui_node_editor::GetSelectedObjectCount()
+    if (count > 0) {
+        var buf : array<void?>
+        buf |> resize(count)
+        var n = 0
+        unsafe {
+            n = imgui_node_editor::GetActionContextLinks(reinterpret<LinkId?>(addr(buf[0])), count)
+        }
+        result <- [for (i in range(n)); LinkId(intptr(buf[i]))]
+        delete buf
+    }
+    imgui_node_editor::SetCurrentEditor(null)
+    return <- result
 }

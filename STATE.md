@@ -34,7 +34,20 @@ Last updated: 2026-05-29. **PRs #1–#5 MERGED to master; #6 (this branch
   `pin()` `pivot_scale` (completes the pivot trio), and `group_hint(id) $(var fg; var bg)` (off-screen
   group-label overlay; self-gates on zoom). All wired into `shader_graph.das` + covered by
   `test_render_config.das`. Closes the deferred niche rendering items; only clipboard/shortcuts remains.
-  Remaining backlog: clipboard/shortcuts (the largest native chunk, telemetry-bearing — its own PR).
+- **#8** (this branch — `bbatkin/node-editor-shortcuts`) — **clipboard / edit shortcuts — the LAST
+  native rail.** Events (same shape as context menus): `with_shortcuts(ctx)` brackets
+  BeginShortcut/EndShortcut; `accept_copy`/`accept_cut`/`accept_paste`/`accept_duplicate`/
+  `accept_create_node` each fire true on their chord + record `last_shortcut_action` /
+  `last_shortcut_context_size` (telemetry). Shortcuts ON by default in `create_node_editor`
+  (`enable_shortcuts` toggles). Injection rail `enqueue_shortcut(ctx, kind)` + `shortcut_cmd` /
+  `clear_pending_shortcuts_cmd` replay through the same accept handler (native chord synth is
+  finicky → injection is the deterministic/testable path). `get_action_context_nodes/links` read
+  the target set. The editor owns no clipboard CONTENT — the demo carries an app clipboard (copy
+  captures selected node kinds, paste cascades, cut = copy+delete, duplicate = copy+paste), run
+  post-block via the flag-then-act pattern. Also added `clear_selection_cmd`. Covered by
+  `test_shortcuts.das` (inject duplicate + copy/paste, assert telemetry + node-count growth).
+  **The native imgui_node_editor surface is now fully wrapped.** Remaining: non-native plumbing
+  only (write-back editing, generalize `with_node_editor_app`, richer clipboard handling).
 
 ## Key files
 
