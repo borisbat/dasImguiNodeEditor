@@ -108,8 +108,10 @@ editor id that crosses the live/JSON boundary; `handle_to_editor(uint64)` revers
 - **Node ops + view (transient — no snapshot state, but live-drivable):**
   `center_node_on_screen(ctx, id)`, `navigate_to_selection(ctx, zoom_in=false, duration=-1.0)`,
   `restore_node_state(ctx, id)`, `set_node_z_position(ctx, id, z)` (z DOES reflect — folds into
-  `node_payload`). All bracket `SetCurrentEditor` (callable outside the draw loop); the
-  navigation pair may share `NavigateToContent`'s DPI quirk (Gotchas #5).
+  `node_payload`), `get_node_position(ctx, id)` (geometry read peer of `set_node_position` — use
+  it to capture a layout post-block, e.g. a clipboard copy). All bracket `SetCurrentEditor`
+  (callable outside the draw loop); the navigation pair may share `NavigateToContent`'s DPI quirk
+  (Gotchas #5).
 - **Rendering config:** `with_style_var(StyleVar, value){…}` (float/float2/float4 overloads)
   brackets PushStyleVar/PopStyleVar; `with_style_color(StyleColor, color){…}` is its color peer
   (PushStyleColor/PopStyleColor — use it for any slot beyond NodeBg, which `node()`'s `color` arg
@@ -178,6 +180,26 @@ dastest.das -- --run modules/dasImguiNodeEditor/tests/integration/<t>.das --head
 stale `daslang`/`daslang-live`/`dastest` procs between runs (port 9090 reuse). CI:
 `.github/workflows/tests.yml` (ubuntu/macos/windows; `daspkg install ../dasImgui` THEN
 `../dasImguiNodeEditor` — dependency order).
+
+**Test helpers (`imgui_editor_playwright`)** — layered on dasImgui's `imgui_playwright`
+(re-exported, so `require imgui/imgui_editor_playwright public` is all a test needs beyond
+`imgui_node_editor_app` for `with_node_editor_app`). `ne_open(app, canvas)` waits for the
+canvas + returns an `EditorSession {app, handle, canvas}`; the `ne_*` helpers inject the
+handle into the editor-targeted commands (`ne_select_node`/`ne_add_link`/`ne_shortcut`/
+`ne_delete_node`/…), read the snapshot (`ne_node`/`ne_node_exists`/`ne_payload`/`ne_node_count`/
+`ne_snapshot`), and wait (`ne_wait_widget`/`ne_wait_payload_str`/`ne_wait_shortcut`). Prefer
+these over hand-threading the handle + raw `post_command`/`find_widget`. Keep distinct command
+POSTs lean (the Windows libhv ~16-POST/subprocess ceiling); snapshot polling inside the waits
+doesn't count against it. The module is `public` (not `shared`) — it requires the non-shared
+`imgui_playwright`, and a `shared` module can't require a non-shared one (error 20115).
+
+**Demo editor-realism behavior** (`shader_graph.das`, app-owned topology — mirror in real
+consumers): links are normalized so `from_pin` is always the output; `can_add_link` rejects
+self-loops, duplicate output→input pairs, and cycle-forming links (a downstream reachability
+walk keeps the graph a DAG); a new link to an already-fed input REPLACES the old one (inputs
+are single fan-in). The clipboard copies node kinds + RELATIVE positions + the links internal
+to the selection (remapped by node-index + pin-slot); paste lands at the cursor preserving
+layout, duplicate offsets near the originals.
 
 ## Gotchas
 

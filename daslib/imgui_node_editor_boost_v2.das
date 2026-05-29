@@ -150,6 +150,18 @@ def set_node_position(ctx : imgui_node_editor::EditorContext?; id : NodeId; pos 
     return true
 }
 
+def get_node_position(ctx : imgui_node_editor::EditorContext?; id : NodeId) : float2 {
+    //! Read a node's editor-owned canvas position from OUTSIDE the draw loop (brackets
+    //! SetCurrentEditor). The geometry read peer of set_node_position — use it to capture
+    //! a layout (e.g. a clipboard copy that preserves relative positions). float2(0,0) for
+    //! a null ctx.
+    return float2(0.0, 0.0) if (ctx == null)
+    imgui_node_editor::SetCurrentEditor(ctx)
+    let pos = imgui_node_editor::GetNodePosition(id)
+    imgui_node_editor::SetCurrentEditor(null)
+    return pos
+}
+
 def flow(ctx : imgui_node_editor::EditorContext?; link_id : LinkId;
          dir : imgui_node_editor::FlowDirection = imgui_node_editor::FlowDirection.Forward) : bool {
     //! Trigger a one-shot "data flow" pulse along link_id — a marker that travels the

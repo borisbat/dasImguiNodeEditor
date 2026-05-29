@@ -48,6 +48,18 @@ Last updated: 2026-05-29. **PRs #1–#5 MERGED to master; #6 (this branch
   `test_shortcuts.das` (inject duplicate + copy/paste, assert telemetry + node-count growth).
   **The native imgui_node_editor surface is now fully wrapped.** Remaining: non-native plumbing
   only (write-back editing, generalize `with_node_editor_app`, richer clipboard handling).
+- **#9** (this branch — `bbatkin/node-editor-realism`) — **editor realism + test infra.** Made
+  `shader_graph.das` behave like a real node editor (app-owned topology): link direction
+  normalized (from=output), `can_add_link` rejects duplicates / self-loops / cycles (downstream
+  reachability → DAG), new link to an occupied input REPLACES it (single fan-in); clipboard now
+  copies node kinds + RELATIVE positions + the links internal to the selection (remapped by
+  node-index + pin-slot), paste lands at the cursor preserving layout, duplicate offsets near the
+  originals. New rail `get_node_position(ctx, id)` (bracketed geometry read, for copy). New test
+  infra: **`imgui_editor_playwright`** (`EditorSession` + `ne_*` helpers over imgui_playwright) —
+  all 9 existing tests refactored onto it. New live command `spawn_node_cmd` (demo, for
+  deterministic id-based tests). New tests `test_link_rules.das`
+  (dedupe/self-loop/cycle/replace) + `test_clipboard.das` (copy-links + preserved layout). 11
+  integration tests green locally. Stacked on #8 (rebases to master when #8 merges).
 
 ## Key files
 

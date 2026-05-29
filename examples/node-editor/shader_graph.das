@@ -71,14 +71,26 @@ var g_drag_from_pin : int = 0                          // source pin of a node-b
 var g_last_link : int = 0                              // most-recently connected link — auto-flows each frame (draw_editor)
 var g_shortcut_action = ""                             // clipboard shortcut accepted this frame; handled AFTER the node_editor block
 
+var g_paste_anchor : float2                            // canvas pos captured at accept_paste (cursor) — where paste lands
+
 // App-owned clipboard. The editor owns no clipboard content — accept_copy/cut just say
-// "a copy happened"; the app captures the selected node KINDS here (positions are not
-// preserved — paste cascades like the toolbar). Kinds+titles are enough to recreate.
-struct ClipEntry {
+// "a copy happened"; the app captures the selected cluster here: node kinds + RELATIVE
+// positions, plus the links INTERNAL to the selection (by node-index + pin-slot, so they
+// remap to the fresh pin ids on paste). Paste recreates the cluster preserving layout.
+struct ClipNode {
     kind  : NodeKind
     title : string
+    rel   : float2          // position relative to the copied cluster's top-left (g_clip_origin)
 }
-var g_clipboard : array<ClipEntry>
+struct ClipLink {
+    from_idx  : int         // index into g_clip_nodes (source node)
+    from_slot : int         // which OUTPUT pin of that node
+    to_idx    : int         // index into g_clip_nodes (dest node)
+    to_slot   : int         // which INPUT pin of that node
+}
+var g_clip_nodes  : array<ClipNode>
+var g_clip_links  : array<ClipLink>
+var g_clip_origin : float2                             // top-left of the copied cluster (duplicate offsets off this)
 
 // Per-id NarrativeState slots for the loop-rendered title / pin-name text().
 // The plain text("foo") form shares ONE state global per source line, so every
@@ -136,9 +148,95 @@ def pin_is_output(var g : Graph; pid : int) : bool {
     return false
 }
 
-def valid_link(var g : Graph; a : int; b : int) : bool {
-    // A link must join an output to an input — reject output->output / input->input.
-    return pin_is_output(g, a) != pin_is_output(g, b)
+def pin_node(var g : Graph; pid : int) : int {
+    // Node that owns pin `pid` (0 = not found).
+    for (n in values(g.nodes)) {
+        for (p in n.inputs) {
+            return n.id if (p.id == pid)
+        }
+        for (p in n.outputs) {
+            return n.id if (p.id == pid)
+        }
+    }
+    return 0
+}
+
+def pin_slot(var g : Graph; pid : int) : int {
+    // Index of pin `pid` within its node's output (or input) list — the stable slot a
+    // clipboard link records so it remaps to the pasted node's fresh pin id.
+    for (n in values(g.nodes)) {
+        for (i in range(length(n.outputs))) {
+            return i if (n.outputs[i].id == pid)
+        }
+        for (i in range(length(n.inputs))) {
+            return i if (n.inputs[i].id == pid)
+        }
+    }
+    return 0
+}
+
+def link_exists(var g : Graph; out_pid : int; in_pid : int) : bool {
+    // A link already connects this exact output -> input pair (dedupe guard).
+    for (l in values(g.links)) {
+        return true if (l.from_pin == out_pid && l.to_pin == in_pid)
+    }
+    return false
+}
+
+def remove_link_on_input(var g : Graph; in_pid : int) {
+    // Inputs are single-connection: drop any existing link feeding this input
+    // (replace-on-reconnect). At most one given the rule, but scan defensively.
+    var dead = 0
+    for (l in values(g.links)) {
+        if (l.to_pin == in_pid) {
+            dead = l.id
+        }
+    }
+    if (dead != 0) {
+        g.links |> erase(dead)
+    }
+}
+
+def creates_cycle(var g : Graph; src_node : int; dst_node : int) : bool {
+    // Would adding src_node -> dst_node form a cycle? It would iff dst_node can already
+    // reach src_node downstream (dst is upstream of src). Shader graphs must stay DAGs.
+    return true if (src_node == dst_node)
+    var stack : array<int>
+    stack |> push(dst_node)
+    var seen : table<int>
+    var hit = false
+    while (!empty(stack) && !hit) {
+        let cur = stack[length(stack) - 1]
+        stack |> erase(length(stack) - 1)
+        if (!key_exists(seen, cur)) {
+            seen |> insert(cur)
+            if (cur == src_node) {
+                hit = true
+            } else {
+                for (l in values(g.links)) {
+                    if (pin_node(g, l.from_pin) == cur) {
+                        let nxt = pin_node(g, l.to_pin)
+                        if (nxt != 0) {
+                            stack |> push(nxt)
+                        }
+                    }
+                }
+            }
+        }
+    }
+    delete stack
+    delete seen
+    return hit
+}
+
+def can_add_link(var g : Graph; out_pid : int; in_pid : int) : bool {
+    // Caller normalizes so out_pid is an output, in_pid an input. Rejects self-loops,
+    // duplicate pairs, and cycle-forming links. Input OCCUPANCY is not a block here — the
+    // create handler replaces an existing link on the input (single fan-in, last-wins).
+    let src = pin_node(g, out_pid)
+    let dst = pin_node(g, in_pid)
+    return !(src == 0 || dst == 0 || src == dst
+          || link_exists(g, out_pid, in_pid) || creates_cycle(g, src, dst))
 }
 
 def add_link(var g : Graph; from_pin : int; to_pin : int) {
@@ -413,14 +511,24 @@ def draw_editor() {
             var b = 0
             if (query_new_link(g_ed, a, b)) {
                 if (a != 0 && b != 0) {
-                    // Validity gates accept-vs-reject (called every frame); accept's
-                    // bool return gates the actual commit.
-                    if (valid_link(g_graph, a, b)) {
-                        if (accept_new_item(g_ed)) {
-                            add_link(g_graph, a, b)
-                        }
-                    } else {
+                    // Pins come in DRAG order — normalize so `from` is the output, `to` the
+                    // input (reversed if the user dragged input -> output). Reject same-kind
+                    // pairs outright; can_add_link gates self-loops / duplicates / cycles.
+                    // Validity gates accept-vs-reject each frame; accept's bool return gates
+                    // the actual commit, where we replace any existing link on the input.
+                    if (pin_is_output(g_graph, a) == pin_is_output(g_graph, b)) {
                         reject_new_item(g_ed)
+                    } else {
+                        let from = pin_is_output(g_graph, a) ? a : b
+                        let to = pin_is_output(g_graph, a) ? b : a
+                        if (can_add_link(g_graph, from, to)) {
+                            if (accept_new_item(g_ed)) {
+                                remove_link_on_input(g_graph, to)
+                                add_link(g_graph, from, to)
+                            }
+                        } else {
+                            reject_new_item(g_ed)
+                        }
                     }
                 }
             }
@@ -456,6 +564,9 @@ def draw_editor() {
                 g_shortcut_action = "cut"
             } elif (accept_paste(g_ed)) {
                 g_shortcut_action = "paste"
+                // Capture the cursor in canvas space NOW (editor is current; ScreenToCanvas
+                // needs it). handle_shortcut_action runs post-block where it'd be unavailable.
+                g_paste_anchor = imgui_node_editor::ScreenToCanvas(GetMousePos())
             } elif (accept_duplicate(g_ed)) {
                 g_shortcut_action = "duplicate"
             }
@@ -541,31 +652,76 @@ def draw_editor() {
 // ===== clipboard / shortcuts (app owns the clipboard content) =====
 
 def clipboard_copy(ctx : imgui_node_editor::EditorContext?) {
-    // Capture the selected nodes' kinds (paste cascades — positions aren't preserved).
+    // Capture the selected cluster: node kinds + positions relative to the cluster's
+    // top-left (g_clip_origin), and the links whose BOTH endpoints are selected (recorded
+    // by node-index + pin-slot so they remap onto the pasted nodes' fresh pin ids).
     var sel <- get_selected_nodes(ctx)
-    g_clipboard |> clear()
+    g_clip_nodes |> clear()
+    g_clip_links |> clear()
+    // Pass 1: gather real nodes (skip group ids) + their editor positions; track the min corner.
+    var ids : array<int>
+    var poss : array<float2>
+    var origin = float2(1.0e9, 1.0e9)
     for (nid in sel) {
-        if (key_exists(g_graph.nodes, nid)) {
-            // kind + title are copyable scalars; two reads (no insert → no rehash).
-            let knd = g_graph.nodes[nid].kind
-            let ttl = g_graph.nodes[nid].title
-            g_clipboard |> push(ClipEntry(kind = knd, title = ttl))
+        continue if (!key_exists(g_graph.nodes, nid))
+        let p = get_node_position(ctx, nid)
+        ids |> push(nid)
+        poss |> push(p)
+        if (p.x < origin.x) {
+            origin.x = p.x
+        }
+        if (p.y < origin.y) {
+            origin.y = p.y
         }
     }
+    g_clip_origin = empty(ids) ? float2(0.0, 0.0) : origin
+    // Pass 2: clip nodes (relative layout) + a node-id -> clip-index map for link capture.
+    var node_to_clipidx : table<int; int>
+    for (i in range(length(ids))) {
+        let nid = ids[i]
+        let knd = g_graph.nodes[nid].kind
+        let ttl = g_graph.nodes[nid].title
+        node_to_clipidx[nid] = i
+        g_clip_nodes |> push(ClipNode(kind = knd, title = ttl, rel = poss[i] - g_clip_origin))
+    }
+    // Internal links (both endpoints in the selection). Links are normalized (from=output).
+    for (l in values(g_graph.links)) {
+        let fn = pin_node(g_graph, l.from_pin)
+        let tn = pin_node(g_graph, l.to_pin)
+        if (key_exists(node_to_clipidx, fn) && key_exists(node_to_clipidx, tn)) {
+            let fi = node_to_clipidx[fn]
+            let ti = node_to_clipidx[tn]
+            g_clip_links |> push(ClipLink(from_idx = fi, from_slot = pin_slot(g_graph, l.from_pin),
+                                          to_idx = ti, to_slot = pin_slot(g_graph, l.to_pin)))
+        }
+    }
+    delete ids
+    delete poss
+    delete node_to_clipidx
     delete sel
 }
 
-def clipboard_paste(ctx : imgui_node_editor::EditorContext?) {
-    // Recreate each clipboard entry at a cascade offset, selecting the pasted nodes (so a
-    // follow-up paste/duplicate chains off the new selection).
+def clipboard_paste(ctx : imgui_node_editor::EditorContext?; anchor : float2) {
+    // Recreate the clipboard cluster with its top-left at `anchor`, preserving relative
+    // layout, then re-link the internal edges onto the fresh pins. Pasted nodes come in
+    // selected so a follow-up paste/duplicate chains off them.
+    return if (empty(g_clip_nodes))
     clear_selection(ctx)
-    for (ce in g_clipboard) {
-        let pos = float2(480.0 + float(g_spawn % 6) * 28.0, 380.0 + float(g_spawn % 6) * 28.0)
-        g_spawn = g_spawn + 1
+    var idx_to_new : table<int; int>
+    for (i in range(length(g_clip_nodes))) {
+        let ce = g_clip_nodes[i]
+        let pos = anchor + ce.rel
         let nid = spawn_node(g_graph, ce.kind, pos)
         set_node_position(ctx, nid, pos)
         select_node(ctx, nid, true)
+        idx_to_new[i] = nid
     }
+    for (cl in g_clip_links) {
+        let fn = idx_to_new[cl.from_idx]
+        let tn = idx_to_new[cl.to_idx]
+        add_link(g_graph, out_pin(g_graph, fn, cl.from_slot), in_pin(g_graph, tn, cl.to_slot))
+    }
+    delete idx_to_new
 }
 
 def handle_shortcut_action(ctx : imgui_node_editor::EditorContext?) {
@@ -579,10 +735,10 @@ def handle_shortcut_action(ctx : imgui_node_editor::EditorContext?) {
         }
         delete sel
     } elif (g_shortcut_action == "paste") {
-        clipboard_paste(ctx)
+        clipboard_paste(ctx, g_paste_anchor)    // at the cursor (captured at accept_paste)
     } elif (g_shortcut_action == "duplicate") {
         clipboard_copy(ctx)
-        clipboard_paste(ctx)
+        clipboard_paste(ctx, g_clip_origin + float2(30.0, 30.0))    // near the originals, layout preserved
     }
     g_shortcut_action = ""
 }
@@ -638,6 +794,26 @@ def spawn_group_cmd(input : JsonValue?) : JsonValue? {
     let h = input?["h"] ?? 160.0
     let gid = spawn_group(title, float2(x, y), float2(w, h))
     return JV((id = gid))
+}
+
+[live_command(description = "Spawn a node: input kind (\"tex\"|\"tint\"|\"mul\"|\"add\"|\"output\"), x, y. Returns the new node id (pins follow: Mul/Add = inA id+1, inB id+2, out id+3).")]
+def spawn_node_cmd(input : JsonValue?) : JsonValue? {
+    let kind_s = input?["kind"] ?? "mul"
+    let x = input?["x"] ?? 200.0
+    let y = input?["y"] ?? 200.0
+    var k = NodeKind.Mul
+    if (kind_s == "tex") {
+        k = NodeKind.TexInput
+    } elif (kind_s == "tint") {
+        k = NodeKind.ConstInput
+    } elif (kind_s == "add") {
+        k = NodeKind.Add
+    } elif (kind_s == "output") {
+        k = NodeKind.ColorOutput
+    }
+    let nid = spawn_node(g_graph, k, float2(x, y))
+    set_node_position(g_ed, nid, float2(x, y))
+    return JV((id = nid))
 }
 
 [live_command(description = "Editor display + framebuffer dimensions for debugging coverage")]
