@@ -19,7 +19,7 @@ require imgui/imgui_node_editor_theme_daslang
 require imgui/imgui_node_editor_app
 
 
-def document_module_imgui_node_editor_boost_v2(root : string) {
+def document_module_imgui_node_editor_boost_v2() {
     var mod = find_module("imgui_node_editor_boost_v2")
     // node_editor / node / pin / link / node_group are forward_argument widget
     // macros (no documentable render function survives expansion), so they auto-
@@ -41,7 +41,7 @@ def document_module_imgui_node_editor_boost_v2(root : string) {
     document("Boost v2 — the node-editor DSL: graph entities, link/delete queues, selection, context menus, shortcuts, styling", mod, "imgui_node_editor_boost_v2.rst", groups)
 }
 
-def document_module_imgui_editor_playwright(root : string) {
+def document_module_imgui_editor_playwright() {
     var mod = find_module("imgui_editor_playwright")
     var groups <- array<DocGroup>(
         group_by_regex("Session",            mod, %regex~^ne_open$%%),
@@ -53,7 +53,7 @@ def document_module_imgui_editor_playwright(root : string) {
     document("Editor playwright — node-editor-aware test layer over imgui_playwright (EditorSession + ne_* helpers)", mod, "imgui_editor_playwright.rst", groups)
 }
 
-def document_module_imgui_node_editor_theme_daslang(root : string) {
+def document_module_imgui_node_editor_theme_daslang() {
     var mod = find_module("imgui_node_editor_theme_daslang")
     var groups <- array<DocGroup>(
         group_by_regex("Canvas theme", mod, %regex~^apply_daslang_node_editor_style$%%),
@@ -62,7 +62,7 @@ def document_module_imgui_node_editor_theme_daslang(root : string) {
     document("Canvas theme — daslang-styled node-editor colors and style vars", mod, "imgui_node_editor_theme_daslang.rst", groups)
 }
 
-def document_module_imgui_node_editor_app(root : string) {
+def document_module_imgui_node_editor_app() {
     var mod = find_module("imgui_node_editor_app")
     var groups <- array<DocGroup>(
         group_by_regex("App harness", mod, %regex~^with_node_editor_app$%%),
@@ -90,10 +90,9 @@ def main {
         topic_root = "{ne_doc}/generated"
         handmade_root = ne_doc
 
-        let root = topic_root
-        document_module_imgui_node_editor_boost_v2(root)
-        document_module_imgui_editor_playwright(root)
-        document_module_imgui_node_editor_theme_daslang(root)
-        document_module_imgui_node_editor_app(root)
+        document_module_imgui_node_editor_boost_v2()
+        document_module_imgui_editor_playwright()
+        document_module_imgui_node_editor_theme_daslang()
+        document_module_imgui_node_editor_app()
     }
 }
