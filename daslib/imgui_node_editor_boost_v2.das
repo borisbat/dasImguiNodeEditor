@@ -42,6 +42,17 @@ def private record_ctx_menu(ctx : imgui_node_editor::EditorContext?; var st : Ct
     g_ctx_menus[intptr(ctx)] = st
 }
 
+// Last "new node by drag" release per editor — the user dragged from a pin into
+// empty canvas and let go. show_new_node_drag records {from_pin, pos} here; it's
+// the create-flow peer of CtxMenuState (a drag-release is the same "gesture at a
+// point → app spawns" shape as the background context menu, plus a source pin to
+// auto-connect). Surfaced in node_editor_payload as last_new_node_drag_*.
+struct private NodeDragState {
+    from_pin : PinId = 0               //! pin the drag started at (0 = none/never)
+    pos      : float2 = float2(0.0, 0.0)   //! canvas-space drop point
+}
+var private g_node_drags : table<uint64; NodeDragState>
+
 // Active editor for the currently-open node_editor() block, set for its duration
 // (stored as void? — it only flows into WidgetEntry.serialize_ctx). node/pin/link
 // stash it so their lazy snapshot serializers can SetCurrentEditor before querying
@@ -112,6 +123,20 @@ def set_node_position(ctx : imgui_node_editor::EditorContext?; id : NodeId; pos 
     return true
 }
 
+def flow(ctx : imgui_node_editor::EditorContext?; link_id : LinkId;
+         dir : imgui_node_editor::FlowDirection = imgui_node_editor::FlowDirection.Forward) : bool {
+    //! Trigger a one-shot "data flow" pulse along link_id — a marker that travels the
+    //! link and fades over style.FlowDuration. Imperative editor action (NOT a link
+    //! property): re-call to re-pulse, or call every frame for continuous flow. Brackets
+    //! SetCurrentEditor so it works from outside the draw loop (live command, post-block).
+    //! No-op for a null ctx; a stale/deleted link_id is a safe no-op (editor FindLink-guards).
+    return false if (ctx == null)
+    imgui_node_editor::SetCurrentEditor(ctx)
+    imgui_node_editor::Flow(link_id, dir)
+    imgui_node_editor::SetCurrentEditor(null)
+    return true
+}
+
 // ===== graph entities (node / pin / link) — id-keyed via forward_argument =====
 //
 // Each takes the editor's int id as the first arg, forwarded through the
@@ -152,13 +177,19 @@ def private node_editor_payload(ctx : void?; id : int) : JsonValue? {
     if (key_exists(g_ctx_menus, h)) {
         cm = g_ctx_menus[h]
     }
+    var nd = NodeDragState()
+    if (key_exists(g_node_drags, h)) {
+        nd = g_node_drags[h]
+    }
     return JV((
         handle = h,
         last_context_kind = cm.kind,
         last_node_context_menu = cm.node,
         last_pin_context_menu = cm.pin,
         last_link_context_menu = cm.link,
-        last_background_context_menu = cm.pos
+        last_background_context_menu = cm.pos,
+        last_new_node_drag_from_pin = nd.from_pin,
+        last_new_node_drag_pos = nd.pos
     ))
 }
 
@@ -311,14 +342,44 @@ def clear_pending_links(ctx : imgui_node_editor::EditorContext?) {
     }
 }
 
+// Queued "new node by drag" releases (the enqueue_new_node_drag injection rail —
+// the testable/drivable twin of a real pin-drag-into-empty-space). Pop-on-serve,
+// one-shot: a drag-release is a single moment, not a multi-frame offer like a link.
+struct private PendingNodeDrag {
+    editor   : uint64
+    from_pin : PinId
+    pos      : float2
+}
+
+var private g_pending_node_drags : array<PendingNodeDrag>
+
+def private has_pending_node_drag(h : uint64) : bool {
+    for (pd in g_pending_node_drags) {
+        return true if (pd.editor == h)
+    }
+    return false
+}
+
+def enqueue_new_node_drag(ctx : imgui_node_editor::EditorContext?; from_pin : PinId; pos : float2) : bool {
+    //! Queue a synthetic "new node by drag" release for `ctx` — the source pin the
+    //! drag began at + the canvas-space drop point. show_new_node_drag serves it on
+    //! the next frame exactly as a real release, firing the app's create-node flow.
+    //! The drivable/testable twin of dragging from a pin into empty canvas (pin
+    //! geometry isn't queryable, so a real drag can't be synth-targeted). Returns
+    //! false for a null ctx or 0 source pin.
+    return false if (ctx == null || from_pin == 0)
+    g_pending_node_drags |> push(PendingNodeDrag(editor = intptr(ctx), from_pin = from_pin, pos = pos))
+    return true
+}
+
 def begin_create(ctx : imgui_node_editor::EditorContext?; blk : block) {
     //! Bracket BeginCreate/EndCreate for `ctx` (drag-preview link drawn white, 1px).
-    //! Invokes the body when the user is dragging a new link OR a queued link is
-    //! pending. Inside, call query_new_link + accept_new_item — they transparently
-    //! serve the queued link when injecting.
+    //! Invokes the body when the user is dragging a new link/node OR a queued link
+    //! or node-drag is pending. Inside, call query_new_link + accept_new_item and/or
+    //! show_new_node_drag — they transparently serve the queued item when injecting.
     let native = imgui_node_editor::BeginCreate(float4(1.0, 1.0, 1.0, 1.0), 1.0)
     let h = intptr(ctx)
-    if (native || has_pending(h)) {
+    if (native || has_pending(h) || has_pending_node_drag(h)) {
         invoke(blk)
     }
     imgui_node_editor::EndCreate()
@@ -366,6 +427,40 @@ def reject_new_item(ctx : imgui_node_editor::EditorContext?) {
         return
     }
     imgui_node_editor::RejectNewItem()
+}
+
+def show_new_node_drag(ctx : imgui_node_editor::EditorContext?; var from_pin : PinId&; var drop_pos : float2&) : bool {
+    //! Inside begin_create: true the frame the user drops a pin-drag in empty canvas
+    //! (or a queued drag is served). Hands back the source pin + canvas-space drop
+    //! point and records last_new_node_drag on the editor. The app responds by opening
+    //! its create-node UI and, on pick, spawning at drop_pos + enqueue_new_link(source
+    //! -> new pin). Returns false (no out-param write) otherwise. EVENT, not a scope —
+    //! folds QueryNewNode + AcceptNewItem (green "can drop" preview during the drag).
+    let h = intptr(ctx)
+    // Injected drag wins (pop-on-serve, one-shot) — bypasses the editor interaction,
+    // same as enqueue_new_link vs a live drag.
+    for (i in range(length(g_pending_node_drags))) {
+        if (g_pending_node_drags[i].editor == h) {
+            let pd = g_pending_node_drags[i]
+            from_pin = pd.from_pin
+            drop_pos = pd.pos
+            g_pending_node_drags |> erase(i)
+            g_node_drags[h] = NodeDragState(from_pin = pd.from_pin, pos = pd.pos)
+            return true
+        }
+    }
+    // Live drag: QueryNewNode is true while dragging into empty space (hands back the
+    // source pin); AcceptNewItem arms the green preview and returns true on release.
+    var p = 0
+    if (imgui_node_editor::QueryNewNode(safe_addr(p))) {
+        if (imgui_node_editor::AcceptNewItem()) {
+            from_pin = p
+            drop_pos = imgui_node_editor::ScreenToCanvas(GetMousePos())
+            g_node_drags[h] = NodeDragState(from_pin = p, pos = drop_pos)
+            return true
+        }
+    }
+    return false
 }
 
 // ===== item deletion (queue-injectable; drivable via live) =====

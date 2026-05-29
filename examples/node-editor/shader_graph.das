@@ -55,6 +55,8 @@ var g_request_navigate : bool = false
 var g_ctx_node : int = 0                               // node under a right-click (node context menu)
 var g_ctx_link : int = 0                               // link under a right-click (link context menu)
 var g_ctx_pos  : float2                                // canvas pos to place a context-menu-created node
+var g_drag_from_pin : int = 0                          // source pin of a node-by-drag; 0 = plain right-click (no auto-connect)
+var g_last_link : int = 0                              // most-recently connected link — auto-flows each frame (draw_editor)
 
 // Per-id NarrativeState slots for the loop-rendered title / pin-name text().
 // The plain text("foo") form shares ONE state global per source line, so every
@@ -113,6 +115,7 @@ def valid_link(var g : Graph; a : int; b : int) : bool {
 def add_link(var g : Graph; from_pin : int; to_pin : int) {
     let lid = alloc_id(g)
     g.links[lid] = Link(id = lid, from_pin = from_pin, to_pin = to_pin)
+    g_last_link = lid    // demo: the most-recently connected link auto-flows (see draw_editor)
 }
 
 def remove_node(var g : Graph; nid : int) {
@@ -216,12 +219,40 @@ def node_tint(kind : NodeKind) : float4 {
     return float4(-1.0, -1.0, -1.0, -1.0)
 }
 
+// Pin layout per kind — single source of truth shared by spawn_node, the menu
+// filter (connectable), and connect-on-select. (TexInput/ConstInput are sources:
+// out only; ColorOutput is a sink: in only; Add/Mul are both.)
+def kind_has_input(kind : NodeKind) : bool {
+    return kind == NodeKind.Add || kind == NodeKind.Mul || kind == NodeKind.ColorOutput
+}
+
+def kind_has_output(kind : NodeKind) : bool {
+    return kind == NodeKind.TexInput || kind == NodeKind.ConstInput || kind == NodeKind.Add || kind == NodeKind.Mul
+}
+
+def connectable(kind : NodeKind) : bool {
+    // Plain right-click (no source pin) → every kind. Drag from a pin → only kinds
+    // that can connect: source output needs a kind with an input, and vice-versa.
+    return true if (g_drag_from_pin == 0)
+    return pin_is_output(g_graph, g_drag_from_pin) ? kind_has_input(kind) : kind_has_output(kind)
+}
+
 def ctx_spawn(kind : NodeKind) {
-    // Create a node from the right-click menu, placed at the cursor. Runs INSIDE
-    // the node_editor block (editor already current) → raw SetNodePosition, not
-    // the SetCurrentEditor-bracketed wrapper.
+    // Spawn the chosen kind at the gesture point. Runs INSIDE the node_editor block
+    // (editor already current) → raw SetNodePosition, not the bracketed wrapper.
     let nid = spawn_node(g_graph, kind, g_ctx_pos)
     imgui_node_editor::SetNodePosition(nid, g_ctx_pos)
+    // Came from a pin-drag → auto-connect source to the new node's compatible pin.
+    // The menu was filtered to connectable kinds, so the target pin always exists.
+    // enqueue_new_link is order-sensitive (output -> input); valid_link enforces it.
+    if (g_drag_from_pin != 0) {
+        if (pin_is_output(g_graph, g_drag_from_pin)) {
+            enqueue_new_link(g_ed, g_drag_from_pin, in_pin(g_graph, nid, 0))
+        } else {
+            enqueue_new_link(g_ed, out_pin(g_graph, nid, 0), g_drag_from_pin)
+        }
+        g_drag_from_pin = 0
+    }
 }
 
 // Single-graph demo: the app owns ONE Graph (g_graph) and ONE editor (g_ed), so
@@ -257,6 +288,11 @@ def draw_editor() {
             link(l.id, (from = l.from_pin, to = l.to_pin))
         }
 
+        // Set when a pin-drag is released in empty canvas this frame (see below) —
+        // opens the SAME create-node popup as a right-click, with g_drag_from_pin set
+        // so the pick also connects. Frame-local: begin_create writes it, with_suspended
+        // reads it.
+        var drag_fired = false
         begin_create(g_ed) {
             var a = 0
             var b = 0
@@ -272,6 +308,10 @@ def draw_editor() {
                         reject_new_item(g_ed)
                     }
                 }
+            }
+            // Drag from a pin into empty canvas → records g_drag_from_pin + g_ctx_pos.
+            if (show_new_node_drag(g_ed, g_drag_from_pin, g_ctx_pos)) {
+                drag_fired = true
             }
         }
 
@@ -296,13 +336,18 @@ def draw_editor() {
         with_suspended() {
             var nid = 0
             var lid = 0
-            if (show_node_context_menu(g_ed, nid)) {
+            if (drag_fired) {
+                // Pin-drag release → same create-node popup; g_drag_from_pin is set so
+                // the pick connects (menu filtered to connectable kinds).
+                open_popup("ne_bg_menu")
+            } elif (show_node_context_menu(g_ed, nid)) {
                 g_ctx_node = nid
                 open_popup("ne_node_menu")
             } elif (show_link_context_menu(g_ed, lid)) {
                 g_ctx_link = lid
                 open_popup("ne_link_menu")
             } elif (show_background_context_menu(g_ed, g_ctx_pos)) {
+                g_drag_from_pin = 0    // plain right-click → no source pin, no auto-connect
                 open_popup("ne_bg_menu")
             }
             popup_window(NODE_CTX, (str_id = "ne_node_menu", flags = ImGuiWindowFlags.None)) {
@@ -316,23 +361,28 @@ def draw_editor() {
                 }
             }
             // Explicit idents (CREATE_*) give the menu items stable snapshot paths
-            // (MAIN_WIN/shader_graph/BG_CTX/CREATE_*), which the context-menu test
-            // asserts to confirm the menu opened on right-click.
+            // (MAIN_WIN/shader_graph/BG_CTX/CREATE_*). When opened by a pin-drag the
+            // list is filtered to connectable kinds (connectable()), so a non-fitting
+            // item is simply absent from the snapshot — which the test asserts.
             popup_window(BG_CTX, (str_id = "ne_bg_menu", flags = ImGuiWindowFlags.None)) {
-                text("Create Node")
-                if (menu_label(CREATE_TEX, (text = "Texture"))) {
+                if (g_drag_from_pin != 0) {
+                    text("Create + Connect")
+                } else {
+                    text("Create Node")
+                }
+                if (connectable(NodeKind.TexInput) && menu_label(CREATE_TEX, (text = "Texture"))) {
                     ctx_spawn(NodeKind.TexInput)
                 }
-                if (menu_label(CREATE_TINT, (text = "Tint"))) {
+                if (connectable(NodeKind.ConstInput) && menu_label(CREATE_TINT, (text = "Tint"))) {
                     ctx_spawn(NodeKind.ConstInput)
                 }
-                if (menu_label(CREATE_MUL, (text = "Multiply"))) {
+                if (connectable(NodeKind.Mul) && menu_label(CREATE_MUL, (text = "Multiply"))) {
                     ctx_spawn(NodeKind.Mul)
                 }
-                if (menu_label(CREATE_ADD, (text = "Add"))) {
+                if (connectable(NodeKind.Add) && menu_label(CREATE_ADD, (text = "Add"))) {
                     ctx_spawn(NodeKind.Add)
                 }
-                if (menu_label(CREATE_OUT, (text = "Color Output"))) {
+                if (connectable(NodeKind.ColorOutput) && menu_label(CREATE_OUT, (text = "Color Output"))) {
                     ctx_spawn(NodeKind.ColorOutput)
                 }
             }
@@ -345,6 +395,12 @@ def draw_editor() {
             g_request_navigate = false
         }
         g_nav_frames = g_nav_frames + 1
+    }
+    // Continuous flow on the most-recently connected link. Called AFTER the
+    // node_editor block (editor no longer current) so flow()'s SetCurrentEditor
+    // bracket is safe; re-arming every frame keeps the pulse alive. Forward only.
+    if (g_last_link != 0) {
+        flow(g_ed, g_last_link)
     }
 }
 

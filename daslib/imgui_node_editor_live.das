@@ -58,6 +58,16 @@ def clear_pending_links_cmd(input : JsonValue?) : JsonValue? {
     return JV("cleared pending links")
 }
 
+[live_command(description = "Inject a 'new node by drag' release (drag from a pin into empty canvas): input editor (handle), from (source pin id), x, y (canvas coords). Fires the app's create-node flow next frame.")]
+def new_node_drag_cmd(input : JsonValue?) : JsonValue? {
+    let handle = input?["editor"] ?? uint64(0)
+    let from = input?["from"] ?? 0
+    let x = input?["x"] ?? 0.0
+    let y = input?["y"] ?? 0.0
+    return JV("queued node-drag from pin {from} @ ({x}, {y})") if (enqueue_new_node_drag(handle_to_editor(handle), from, float2(x, y)))
+    return JV("not queued (null editor or 0 pin)")
+}
+
 [live_command(description = "Queue a node deletion for the editor to apply next frame: input editor (handle), id (node id).")]
 def delete_node_cmd(input : JsonValue?) : JsonValue? {
     let handle = input?["editor"] ?? uint64(0)
@@ -79,4 +89,14 @@ def clear_pending_deletes_cmd(input : JsonValue?) : JsonValue? {
     let handle = input?["editor"] ?? uint64(0)
     clear_pending_deletes(handle_to_editor(handle))
     return JV("cleared pending deletes")
+}
+
+[live_command(description = "Trigger a one-shot data-flow pulse along a link: input editor (handle), id (link id), backward (bool, optional — default forward).")]
+def flow_cmd(input : JsonValue?) : JsonValue? {
+    let handle = input?["editor"] ?? uint64(0)
+    let id = input?["id"] ?? 0
+    let backward = input?["backward"] ?? false
+    let dir = backward ? imgui_node_editor::FlowDirection.Backward : imgui_node_editor::FlowDirection.Forward
+    return JV("flowing link {id}") if (flow(handle_to_editor(handle), id, dir))
+    return JV("not flowed (null editor)")
 }
