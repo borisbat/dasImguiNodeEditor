@@ -1,0 +1,185 @@
+name: Build documentation
+
+on:
+  # No `paths:` filter — every push/PR rebuilds, so the published site never
+  # drifts from master. The Sphinx build is cheap; always-rebuild is safer.
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+# One Pages deployment at a time
+concurrency:
+  group: docs-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Layout mirrors tests.yml: daslang + dasImgui + dasImguiNodeEditor are checked
+# out as siblings, then daspkg-installed --global in dependency order (dasImgui
+# first — the node-editor C++ module links dasModuleImgui and uses dasImgui's
+# imgui headers). node_editor2rst then requires the v2 modules so RTTI can
+# enumerate them, which needs both native .shared_modules built (hence the
+# installs) and dasHV/dasGLFW baked into daslang (the -D flags below).
+#
+# Split into build + deploy jobs (same reason as dasImgui's docs.yml): attaching
+# `environment: github-pages` to a job triggers GitHub's deployment-branch
+# protection check before any step runs, instant-failing non-master refs. build
+# runs on every push/PR for full CI signal; deploy runs on master only and is
+# the only job with the environment attached.
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: "Checkout daslang"
+        uses: actions/checkout@v4
+        with:
+          repository: GaijinEntertainment/daScript
+          path: daslang-src
+          ref: master
+
+      - name: "Checkout dasImgui (dependency)"
+        uses: actions/checkout@v4
+        with:
+          # Path basename becomes the daspkg install dir basename.
+          repository: borisbat/dasImgui
+          path: dasImgui
+
+      - name: "Checkout dasImguiNodeEditor"
+        uses: actions/checkout@v4
+        with:
+          path: dasImguiNodeEditor
+          # Full history for the lint step's `git diff origin/<base>...HEAD`.
+          fetch-depth: 0
+
+      - name: "Install system dependencies"
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libglfw3-dev \
+            libfreetype6-dev \
+            mesa-common-dev \
+            xorg-dev
+
+      - name: "Install CMake and Ninja"
+        uses: lukka/get-cmake@latest
+
+      - name: "Install Python dependencies"
+        run: pip install -r daslang-src/doc/requirements.txt
+
+      - name: "Build daslang"
+        working-directory: daslang-src
+        run: |
+          set -eux
+          cmake --no-warn-unused-cli -B./build \
+            -DCMAKE_BUILD_TYPE:STRING=Release \
+            -DDAS_HV_DISABLED=OFF \
+            -DDAS_PUGIXML_DISABLED=OFF \
+            -DDAS_LLVM_DISABLED=ON \
+            -DDAS_GLFW_DISABLED=OFF \
+            -G Ninja
+          cmake --build ./build --parallel --target daslang
+
+      - name: "Lint changed .das files"
+        # Mirrors dasImgui's docs.yml lint step, with both modules on the load
+        # path so the node-editor's `require imgui/...` chain (and its bundled
+        # NODEEDITOR001 lint) resolves without a daspkg install.
+        working-directory: ${{ github.workspace }}/dasImguiNodeEditor
+        run: |
+          set -eux
+          BASE_REF="${{ github.event.pull_request.base.ref }}"
+          BASE_REF="${BASE_REF:-master}"
+          git fetch --depth=50 origin "$BASE_REF" 2>/dev/null || true
+          mapfile -t CHANGED < <(git diff --name-only --diff-filter=AM "origin/${BASE_REF}...HEAD" -- '*.das')
+          if [ ${#CHANGED[@]} -eq 0 ]; then
+            echo "no .das files changed; skipping lint"
+            exit 0
+          fi
+          echo "linting ${#CHANGED[@]} file(s): ${CHANGED[*]}"
+          # Serial (-j 1): parallel workers don't propagate -load_module.
+          ${{ github.workspace }}/daslang-src/bin/daslang \
+            -load_module ${{ github.workspace }}/dasImgui \
+            -load_module ${{ github.workspace }}/dasImguiNodeEditor \
+            ${{ github.workspace }}/daslang-src/utils/lint/main.das -- \
+            "${CHANGED[@]}" --quiet -j 1
+
+      - name: "daspkg install dasImgui (global)"
+        # dasImgui first — the node-editor C++ module links dasModuleImgui and
+        # uses dasImgui's imgui headers (CMakeLists resolves it as a sibling).
+        run: |
+          set -eux
+          ${{ github.workspace }}/daslang-src/bin/daslang \
+            ${{ github.workspace }}/daslang-src/utils/daspkg/main.das -- \
+            install ${{ github.workspace }}/dasImgui --global
+
+      - name: "daspkg install dasImguiNodeEditor (global)"
+        run: |
+          set -eux
+          ${{ github.workspace }}/daslang-src/bin/daslang \
+            ${{ github.workspace }}/daslang-src/utils/daspkg/main.das -- \
+            install ${{ github.workspace }}/dasImguiNodeEditor --global
+
+      - name: "Run node_editor2rst"
+        working-directory: ${{ github.workspace }}/daslang-src/modules/dasImguiNodeEditor
+        run: |
+          set -eux
+          ${{ github.workspace }}/daslang-src/bin/daslang utils/node_editor2rst.das
+
+      - name: "Stub-gate: handmade/ must not contain '// stub'"
+        working-directory: ${{ github.workspace }}/daslang-src/modules/dasImguiNodeEditor
+        run: |
+          set -eux
+          if grep -rl '// stub' doc/source/stdlib/handmade/; then
+            echo "ERROR: Found '// stub' placeholders in handmade docs."
+            echo "Fill them with module intros before merging."
+            exit 1
+          fi
+
+      - name: "Uncategorized-gate: every function must belong to a named group"
+        working-directory: ${{ github.workspace }}/daslang-src/modules/dasImguiNodeEditor
+        run: |
+          set -eux
+          if grep -rl '^Uncategorized$' doc/source/stdlib/generated/; then
+            echo "ERROR: Found 'Uncategorized' sections in generated docs."
+            echo "Add the function(s) to a group_by_regex() in utils/node_editor2rst.das."
+            exit 1
+          fi
+
+      - name: "Build Sphinx HTML"
+        working-directory: ${{ github.workspace }}/daslang-src/modules/dasImguiNodeEditor
+        run: |
+          set -eux
+          sphinx-build -W --keep-going \
+            -b html -d build/sphinx-cache \
+            doc/source build/site
+
+      - name: "Stage site"
+        working-directory: ${{ github.workspace }}/daslang-src/modules/dasImguiNodeEditor
+        run: |
+          set -eux
+          mkdir -p _site
+          cp -r build/site/. _site/
+          # Disable Jekyll: GitHub Pages otherwise drops underscore-prefixed
+          # Sphinx asset directories (_static/, _sources/, ...).
+          touch _site/.nojekyll
+
+      - name: "Upload Pages artifact"
+        if: github.ref == 'refs/heads/master'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: ${{ github.workspace }}/daslang-src/modules/dasImguiNodeEditor/_site
+
+  deploy:
+    if: github.ref == 'refs/heads/master'
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: "Deploy to GitHub Pages"
+        id: deployment
+        uses: actions/deploy-pages@v4
