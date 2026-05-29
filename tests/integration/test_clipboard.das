@@ -35,20 +35,31 @@ def test_clipboard(t : T?) {
         ne_shortcut(s, "copy")
         t |> success(ne_wait_shortcut(s, "copy") != null, "copy served")
 
-        // Paste — wait until link_20 AND both pasted nodes have laid out (non-zero bbox width
-        // ⇒ their canvas position is committed). The link draws a frame BEFORE the node bboxes
-        // settle, so gating on link_20 alone reads pos=0 on slower cadences (macOS CI).
+        // Paste — wait for the SETTLED paste: link_20 up and the two pasted nodes' relative
+        // layout preserved (~300px x / ~50px y apart, not stacked). We read bbox.x/.y, which is
+        // GetNodePosition (canvas space) — set by SetNodePosition and reliable even though the
+        // nodes, pasted at the headless cursor (0,0), land off-canvas and get culled (so their
+        // GetNodeSize stays 0). Position commit lags the link draw by a frame (read 0 on macOS),
+        // so we gate the poll on the final geometry: snapP != null IS the layout-preserved proof,
+        // with no half-committed transient able to slip through.
         ne_shortcut(s, "paste")
-        var snapP = wait_until_sec(d, 6.0f) $(var snap) {
+        var snapP = wait_until_sec(d, 8.0f) $(var snap) {
             if (!widget_exists(snap, "{s.canvas}/link_20")) return false
             let other = widget_exists(snap, "{s.canvas}/node_16") ? 16 : 18
             let bA = find_widget(snap, "{s.canvas}/node_14")?["payload"]?["bbox"]
             let bB = find_widget(snap, "{s.canvas}/node_{other}")?["payload"]?["bbox"]
-            let wA = (bA?["z"] ?? 0.0) - (bA?["x"] ?? 0.0)
-            let wB = (bB?["z"] ?? 0.0) - (bB?["x"] ?? 0.0)
-            return wA > 0.0 && wB > 0.0
+            var dx = (bA?["x"] ?? 0.0) - (bB?["x"] ?? 0.0)
+            var dy = (bA?["y"] ?? 0.0) - (bB?["y"] ?? 0.0)
+            if (dx < 0.0) {
+                dx = -dx
+            }
+            if (dy < 0.0) {
+                dy = -dy
+            }
+            return dx > 250.0 && dx < 350.0 && dy > 20.0 && dy < 80.0
         }
-        t |> success(snapP != null, "paste laid out both nodes + the internal link (link_20)")
+        t |> success(snapP != null,
+                     "paste preserved layout: pasted nodes ~300px x / ~50px y apart (not stacked), link_20 up")
         t |> equal(ne_node_count(s), 6, "paste added both nodes (4 -> 6)")
 
         if (snapP != null) {
@@ -56,25 +67,6 @@ def test_clipboard(t : T?) {
             var l20 = find_widget(snapP, "{s.canvas}/link_20")
             t |> success((l20?["payload"]?["from_pin"] ?? 0) >= 15 && (l20?["payload"]?["to_pin"] ?? 0) >= 15,
                          "copied link joins the pasted nodes, not the originals")
-
-            // Relative layout preserved: the two pasted nodes (node_14 + node_16-or-18) keep the
-            // Texture<->Multiply gap (~300px x, ~50px y) instead of stacking.
-            var other = 16
-            if (!ne_node_exists(snapP, s, 16)) {
-                other = 18
-            }
-            let b14 = ne_node(snapP, s, 14)?["payload"]?["bbox"]
-            let bO = ne_node(snapP, s, other)?["payload"]?["bbox"]
-            var dx = (b14?["x"] ?? 0.0) - (bO?["x"] ?? 0.0)
-            var dy = (b14?["y"] ?? 0.0) - (bO?["y"] ?? 0.0)
-            if (dx < 0.0) {
-                dx = -dx
-            }
-            if (dy < 0.0) {
-                dy = -dy
-            }
-            t |> success(dx > 250.0 && dx < 350.0, "pasted nodes keep the ~300px x-gap (not stacked) — got {dx}")
-            t |> success(dy > 20.0 && dy < 80.0, "pasted nodes keep the ~50px y-gap — got {dy}")
         }
     }
 }
