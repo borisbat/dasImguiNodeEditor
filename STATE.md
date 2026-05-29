@@ -27,6 +27,13 @@ Last updated: 2026-05-29. **PRs #1–#5 MERGED to master; #6 (this branch
   (call after the node block), view ops `center_node_on_screen`/`navigate_to_selection`/
   `restore_node_state`/`set_node_z_position` + their live commands, `get_ordered_node_ids` +
   `ordered_node_ids_cmd`. Demoed in `shader_graph.das`; `test_node_group.das` + `test_node_ops.das`.
+- **#7** (this branch — `bbatkin/node-editor-daslang-style`) — **canvas theme + the last small
+  non-telemetry rails.** New module `imgui_node_editor_theme_daslang` (`apply_daslang_node_editor_style`
+  paints `ed::Style` warm-dark + amber to match the ImGui `apply_daslang_theme` — the ImGui theme alone
+  leaves the canvas the library's default). Plus `with_style_color` (color peer of `with_style_var`),
+  `pin()` `pivot_scale` (completes the pivot trio), and `group_hint(id) $(var fg; var bg)` (off-screen
+  group-label overlay; self-gates on zoom). All wired into `shader_graph.das` + covered by
+  `test_render_config.das`. Closes the deferred niche rendering items; only clipboard/shortcuts remains.
   Remaining backlog: clipboard/shortcuts (the largest native chunk, telemetry-bearing — its own PR).
 
 ## Key files

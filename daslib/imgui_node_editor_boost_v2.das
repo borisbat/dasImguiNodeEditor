@@ -340,20 +340,24 @@ def node_group(id : NodeId; size : float2 = float2(200.0, 150.0); blk : block) {
 [container(forward_argument=true)]
 def pin(id : PinId; kind : PinKind;
         pivot_alignment : float2 = float2(-1.0, -1.0);
-        pivot_size : float2 = float2(-1.0, -1.0); blk : block) {
+        pivot_size : float2 = float2(-1.0, -1.0);
+        pivot_scale : float2 = float2(-1.0, -1.0); blk : block) {
     //! A node pin — `pin(id, kind){…}`, or with geometry config via the tuple form
     //! `pin(id, (kind = PinKind.Output, pivot_alignment = float2(1.0, 0.5)))`. `kind`
-    //! drives BeginPin. pivot_alignment (0..1 within the pin rect) and pivot_size place
-    //! the link-attach point — e.g. align an output pin's pivot to its right edge so
-    //! links leave the node cleanly; a negative x (the -1 default) keeps the editor
-    //! default. Registers as kind "pin"; payload {id} is built lazily (pin_payload).
-    //! `widget_ident` is macro-injected (= "pin_{id}").
+    //! drives BeginPin. pivot_alignment (0..1 within the pin rect), pivot_size and
+    //! pivot_scale place + size the link-attach point — e.g. align an output pin's pivot
+    //! to its right edge so links leave the node cleanly; a negative x (the -1 default on
+    //! each) keeps the editor default for that axis. Registers as kind "pin"; payload {id}
+    //! is built lazily (pin_payload). `widget_ident` is macro-injected (= "pin_{id}").
     imgui_node_editor::BeginPin(id, kind)
     if (pivot_alignment.x >= 0.0) {
         imgui_node_editor::PinPivotAlignment(pivot_alignment)
     }
     if (pivot_size.x >= 0.0) {
         imgui_node_editor::PinPivotSize(pivot_size)
+    }
+    if (pivot_scale.x >= 0.0) {
+        imgui_node_editor::PinPivotScale(pivot_scale)
     }
     invoke(blk)
     imgui_node_editor::EndPin()
@@ -401,6 +405,35 @@ def with_style_var(style_var : imgui_node_editor::StyleVar; value : float4; blk 
     imgui_node_editor::PushStyleVar(style_var, value)
     invoke(blk)
     imgui_node_editor::PopStyleVar(1)
+}
+
+def with_style_color(style_color : imgui_node_editor::StyleColor; color : float4; blk : block) {
+    //! Bracket PushStyleColor/PopStyleColor(1) around the body for a node-editor style
+    //! color (e.g. StyleColor.NodeBorder, StyleColor.HovNodeBorder, StyleColor.Flow) —
+    //! the color peer of with_style_var. Scopes a per-node/per-region override on top of
+    //! the editor's ed::Style (see imgui_node_editor_theme_daslang). node()'s `color` arg
+    //! already covers NodeBg; reach for this for the other slots. Pure rendering config —
+    //! no snapshot state.
+    imgui_node_editor::PushStyleColor(style_color, color)
+    invoke(blk)
+    imgui_node_editor::PopStyleColor(1)
+}
+
+def group_hint(id : NodeId; blk : block<(var fg : ImDrawList?; var bg : ImDrawList?) : void>) : bool {
+    //! Draw an off-screen group-label overlay for group node `id`. The editor only renders
+    //! hints when the canvas is zoomed out (view scale <= 0.75) AND `id` is a group, so
+    //! this returns false (block NOT invoked) otherwise — call it unconditionally per
+    //! group each frame and it self-gates. The block receives the hint foreground +
+    //! background draw lists (feed them add_text / add_rect_filled); position art via
+    //! GetGroupMin()/GetGroupMax(). Must run INSIDE the node_editor() block and NOT inside
+    //! with_suspended (BeginGroupHint suspends/resumes the editor internally). Decorative —
+    //! no snapshot state.
+    return false if (!imgui_node_editor::BeginGroupHint(id))
+    var fg = imgui_node_editor::GetHintForegroundDrawList()
+    var bg = imgui_node_editor::GetHintBackgroundDrawList()
+    invoke(blk, fg, bg)
+    imgui_node_editor::EndGroupHint()
+    return true
 }
 
 def with_node_background_drawlist(id : NodeId; blk : block<(var dl : ImDrawList?) : void>) {
