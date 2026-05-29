@@ -35,10 +35,20 @@ def test_clipboard(t : T?) {
         ne_shortcut(s, "copy")
         t |> success(ne_wait_shortcut(s, "copy") != null, "copy served")
 
-        // Paste — wait on the copied internal link (renders the frame after the pasted nodes).
+        // Paste — wait until link_20 AND both pasted nodes have laid out (non-zero bbox width
+        // ⇒ their canvas position is committed). The link draws a frame BEFORE the node bboxes
+        // settle, so gating on link_20 alone reads pos=0 on slower cadences (macOS CI).
         ne_shortcut(s, "paste")
-        var snapP = ne_wait_widget(s, "link_20", 6.0f)
-        t |> success(snapP != null, "paste recreated the internal link (link_20)")
+        var snapP = wait_until_sec(d, 6.0f) $(var snap) {
+            if (!widget_exists(snap, "{s.canvas}/link_20")) return false
+            let other = widget_exists(snap, "{s.canvas}/node_16") ? 16 : 18
+            let bA = find_widget(snap, "{s.canvas}/node_14")?["payload"]?["bbox"]
+            let bB = find_widget(snap, "{s.canvas}/node_{other}")?["payload"]?["bbox"]
+            let wA = (bA?["z"] ?? 0.0) - (bA?["x"] ?? 0.0)
+            let wB = (bB?["z"] ?? 0.0) - (bB?["x"] ?? 0.0)
+            return wA > 0.0 && wB > 0.0
+        }
+        t |> success(snapP != null, "paste laid out both nodes + the internal link (link_20)")
         t |> equal(ne_node_count(s), 6, "paste added both nodes (4 -> 6)")
 
         if (snapP != null) {
