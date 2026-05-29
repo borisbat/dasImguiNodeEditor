@@ -54,14 +54,20 @@ def test_new_node_drag(t : T?) {
             // Pick the kind where it actually rendered (bbox-resolved click).
             click(d, "MAIN_WIN/shader_graph/BG_CTX/CREATE_ADD")
 
-            // Spawn + auto-connect: a new Add node + a link from pin 8 to its first input.
+            // Spawn: the picked kind creates a new Add node at the drop point.
             var snapNode = wait_for_widget(d, "MAIN_WIN/shader_graph/node_14", 5.0f)
             t |> success(snapNode != null, "picked kind spawned node_14")
             if (snapNode != null) {
                 t |> equal(find_widget(snapNode, "MAIN_WIN/shader_graph/node_14/NODE_TITLE[14]")?["payload"]?["value"] ?? "",
                            "Add", "spawned node titled Add")
-                var l18 = find_widget(snapNode, "MAIN_WIN/shader_graph/link_18")
-                t |> success(!empty(l18?["kind"] ?? ""), "auto-link created")
+            }
+            // Auto-connect: the link is ENQUEUED on the pick frame and served by the
+            // create handler a frame later — so wait for link_18 in its OWN snapshot
+            // rather than reusing snapNode (which races the 1-frame-later commit).
+            var snapLink = wait_for_widget(d, "MAIN_WIN/shader_graph/link_18", 5.0f)
+            t |> success(snapLink != null, "auto-link created")
+            if (snapLink != null) {
+                var l18 = find_widget(snapLink, "MAIN_WIN/shader_graph/link_18")
                 t |> equal(l18?["payload"]?["from_pin"] ?? -1, 8, "auto-link from source pin 8")
                 t |> equal(l18?["payload"]?["to_pin"] ?? -1, 15, "auto-link to new node's input pin 15")
             }
