@@ -97,12 +97,14 @@ editor id that crosses the live/JSON boundary; `handle_to_editor(uint64)` revers
   `select_node(ctx, id, on)` / `select_link(ctx, id, on)` (`on`=append), `clear_selection(ctx)`.
   Pins are not selectable in imgui-node-editor. `get_ordered_node_ids(ctx) : array<NodeId>`
   enumerates draw order (back-to-front).
-- **Groups / comment boxes:** `node_group(id, (size=…)){…}` — a pin-less node that calls
-  `Group(size)`; child nodes dragged onto it move with it. First-class telemetry entity (kind
-  `node_group`, distinct path `node_group_{id}`, reuses `node_payload`). Named `node_group`
-  (NOT `group`) to avoid colliding with imgui's `BeginGroup`/`EndGroup` `group` container.
-  `set_group_size(ctx, id, size)` resizes from outside the draw loop (peer of
-  `set_node_position`; in the example, group size is app-model-owned and re-asserted per frame).
+- **Groups / comment boxes:** `node_group(id, (size=…)){…}` — a pin-less node: the body
+  renders first (its title is the header), then `Group(size)` lays the box below it; child
+  nodes dragged onto it move with it. `size` is a ONE-TIME seed (like node position) — once the
+  node is a group the editor owns its bounds and ignores the passed size on later frames, so
+  `set_group_size(ctx, id, size)` is the resize path (mutating the app-side size alone won't
+  resize). First-class telemetry entity (kind `node_group`, distinct path `node_group_{id}`,
+  reuses `node_payload`). Named `node_group` (NOT `group`) to avoid colliding with imgui's
+  `BeginGroup`/`EndGroup` `group` container.
 - **Node ops + view (transient — no snapshot state, but live-drivable):**
   `center_node_on_screen(ctx, id)`, `navigate_to_selection(ctx, zoom_in=false, duration=-1.0)`,
   `restore_node_state(ctx, id)`, `set_node_z_position(ctx, id, z)` (z DOES reflect — folds into

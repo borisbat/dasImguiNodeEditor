@@ -315,16 +315,17 @@ def node(id : NodeId; color : float4 = float4(-1.0, -1.0, -1.0, -1.0); blk : blo
 [container(forward_argument=true)]
 def node_group(id : NodeId; size : float2 = float2(200.0, 150.0); blk : block) {
     //! A group / comment node — `node_group(id, (size = float2(w,h))){…}`. A group IS a
-    //! node that calls Group(size) right after BeginNode, so child nodes dragged onto it
-    //! move with it. The body typically renders the group title. Named node_group (not
-    //! group) to avoid colliding with imgui's BeginGroup/EndGroup `group` container.
-    //! Registers as kind "node_group"; payload {id, bbox, selected, z} is built lazily at
-    //! snapshot via node_payload (a group is geometrically a node — same bbox/selection/z
-    //! surface), so a test can assert the group's bounds. `widget_ident` is macro-injected
-    //! (= "node_group_{id}").
+    //! node: the body renders FIRST (its title becomes the header), then Group(size) lays
+    //! the resizable box below it, so child nodes dragged onto it move with it. `size` is a
+    //! ONE-TIME seed (like node position) — once the node is a group the editor owns its
+    //! bounds and ignores the passed size on later frames; use set_group_size to resize.
+    //! Named node_group (not group) to avoid colliding with imgui's BeginGroup/EndGroup
+    //! `group` container. Registers as kind "node_group"; payload {id, bbox, selected, z}
+    //! is built lazily via node_payload (a group is geometrically a node). `widget_ident`
+    //! is macro-injected (= "node_group_{id}").
     imgui_node_editor::BeginNode(id)
-    imgui_node_editor::Group(size)
     invoke(blk)
+    imgui_node_editor::Group(size)
     imgui_node_editor::EndNode()
     var entry : WidgetEntry
     let pos = imgui_node_editor::GetNodePosition(id)

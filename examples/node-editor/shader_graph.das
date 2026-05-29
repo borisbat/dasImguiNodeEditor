@@ -195,9 +195,11 @@ def toolbar_spawn(kind : NodeKind) {
 }
 
 def spawn_group(title : string; pos : float2; size : float2) : int {
-    // Group geometry is app-model-owned in this demo: group() re-asserts gr.size each
-    // frame (a fixed comment box). pos is seeded once via the bracketed set_node_position
-    // (toolbar runs outside the node_editor block), then the editor owns it.
+    // Both pos and size are ONE-TIME seeds — the editor owns group geometry after the first
+    // frame. node_group passes gr.size only until the node becomes a group; thereafter the
+    // editor's stored bounds win and gr.size is ignored. pos seeded via the bracketed
+    // set_node_position (toolbar runs outside the node_editor block); to resize a group
+    // later, call set_group_size — mutating GroupBox.size alone won't do it.
     let gid = add_group(g_graph, title, pos, size)
     set_node_position(g_ed, gid, pos)
     return gid
