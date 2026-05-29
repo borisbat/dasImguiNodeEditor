@@ -42,6 +42,16 @@ let private ALLOWED_NE : table<string> <- {
     // snapshot serializers use these; consumers may too).
     "GetNodePosition", "GetNodeSize", "GetLinkPins",
     "IsNodeSelected", "IsLinkSelected",
+    "HasAnyLinks", "PinHadAnyLinks", "GetNodeCount",
+    // Per-frame interaction queries — what the user is hovering / clicked. Pure
+    // reads; consumers branch on them to drive context menus, tooltips, etc.
+    "GetHoveredNode", "GetHoveredPin", "GetHoveredLink",
+    "GetDoubleClickedNode", "GetDoubleClickedPin", "GetDoubleClickedLink",
+    "IsBackgroundClicked", "IsBackgroundDoubleClicked",
+    "GetBackgroundClickButtonIndex", "GetBackgroundDoubleClickButtonIndex",
+    // Editor / node state reads.
+    "IsActive", "IsSuspended", "HasSelectionChanged",
+    "GetNodeZPosition", "GetGroupMin", "GetGroupMax",
     // Canvas <-> screen transforms + view metrics (read-only).
     "GetScreenSize", "GetCurrentZoom", "CanvasToScreen", "ScreenToCanvas",
     // One-time initial node placement. The editor owns geometry after the first

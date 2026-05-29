@@ -22,6 +22,26 @@ typedef LinkId = int
 typedef PinId = int
 typedef NodeId = int
 
+// Per-editor "last context menu" telemetry. The show_*_context_menu events record
+// the right-clicked target HERE (not in user-land); node_editor_payload surfaces it
+// in the snapshot, so the target the app is about to act on stays observable for
+// frames to come — independent of whatever the app chooses to render (popup, button,
+// nothing). Keyed by intptr(ctx). `kind` is the single source of truth for which
+// menu fired last ("" until any fires); each fire REPLACES the whole record, so the
+// other targets reset to their invalid (0 / default) values.
+struct private CtxMenuState {
+    kind : string = ""        //! "" | "node" | "pin" | "link" | "background"
+    node : NodeId = 0         //! right-clicked node id when kind=="node" (0 = none)
+    pin  : PinId = 0          //! right-clicked pin id when kind=="pin"
+    link : LinkId = 0         //! right-clicked link id when kind=="link"
+    pos  : float2 = float2(0.0, 0.0)   //! canvas-space click point when kind=="background"
+}
+var private g_ctx_menus : table<uint64; CtxMenuState>
+
+def private record_ctx_menu(ctx : imgui_node_editor::EditorContext?; var st : CtxMenuState) {
+    g_ctx_menus[intptr(ctx)] = st
+}
+
 // Active editor for the currently-open node_editor() block, set for its duration
 // (stored as void? — it only flows into WidgetEntry.serialize_ctx). node/pin/link
 // stash it so their lazy snapshot serializers can SetCurrentEditor before querying
@@ -124,9 +144,22 @@ def private finalize_entity_leaf(widget_ident : string; kind : string; var entry
 // SetCurrentEditor since the context isn't current outside the node_editor block
 // (same pattern as set_node_position).
 def private node_editor_payload(ctx : void?; id : int) : JsonValue? {
-    // The canvas exposes only the app-owned editor handle (= intptr(editor)) the
-    // live API targets; nothing to query, so no SetCurrentEditor bracket.
-    return JV((handle = intptr(ctx)))
+    // The canvas exposes the app-owned editor handle (= intptr(editor)) the live API
+    // targets, plus the last context-menu target (recorded by show_*_context_menu) so
+    // it's observable across frames. No editor query needed — both are module state.
+    let h = intptr(ctx)
+    var cm = CtxMenuState()
+    if (key_exists(g_ctx_menus, h)) {
+        cm = g_ctx_menus[h]
+    }
+    return JV((
+        handle = h,
+        last_context_kind = cm.kind,
+        last_node_context_menu = cm.node,
+        last_pin_context_menu = cm.pin,
+        last_link_context_menu = cm.link,
+        last_background_context_menu = cm.pos
+    ))
 }
 
 def private node_payload(ctx : void?; id : int) : JsonValue? {
@@ -583,4 +616,76 @@ def clear_selection(ctx : imgui_node_editor::EditorContext?) {
     imgui_node_editor::SetCurrentEditor(ctx)
     imgui_node_editor::ClearSelection()
     imgui_node_editor::SetCurrentEditor(null)
+}
+
+// ===== context menus (right-click; opened + drawn in a Suspend/Resume island) =====
+//
+// imgui-node-editor renders the canvas in a transformed space, so context-menu
+// detection must run inside Suspend()/Resume() (screen space). These are EVENTS,
+// not scopes — they fire true on the right-click frame and hand back the target;
+// the app decides what (if anything) to render in response (popup, button, …).
+// Each fire ALSO records the target on the editor (see CtxMenuState above), so the
+// snapshot shows it for frames to come without any app-side plumbing. Pattern:
+//   with_suspended() {
+//       var id = 0
+//       if (show_node_context_menu(ctx, id))       { open_popup("node-menu") }
+//       elif (show_background_context_menu(ctx, p)) { open_popup("bg-menu") }
+//       popup_window(NODE_MENU, (str_id = "node-menu", …)) { ... }
+//   }
+// (open_popup / popup_window / menu_label are the standard imgui_boost_v2 wrappers.)
+
+def with_suspended(blk : block) {
+    //! Bracket Suspend()/Resume() around the body. Context-menu detection and the
+    //! popups it opens must run here (screen space), not under the canvas transform.
+    imgui_node_editor::Suspend()
+    invoke(blk)
+    imgui_node_editor::Resume()
+}
+
+def show_background_context_menu(ctx : imgui_node_editor::EditorContext?; var canvas_pos : float2&) : bool {
+    //! True the frame the user right-clicks empty canvas; writes the canvas-space
+    //! click point into canvas_pos. Records {kind:"background", pos} on the editor.
+    //! Call inside with_suspended.
+    let ok = imgui_node_editor::ShowBackgroundContextMenu()
+    if (ok) {
+        canvas_pos = imgui_node_editor::ScreenToCanvas(GetMousePos())
+        record_ctx_menu(ctx, CtxMenuState(kind = "background", pos = canvas_pos))
+    }
+    return ok
+}
+
+def show_node_context_menu(ctx : imgui_node_editor::EditorContext?; var nid : NodeId&) : bool {
+    //! True (and writes nid) the frame the user right-clicks a node. Records
+    //! {kind:"node", node:nid} on the editor. Call inside with_suspended.
+    var x = 0
+    let ok = imgui_node_editor::ShowNodeContextMenu(safe_addr(x))
+    nid = x
+    if (ok) {
+        record_ctx_menu(ctx, CtxMenuState(kind = "node", node = x))
+    }
+    return ok
+}
+
+def show_pin_context_menu(ctx : imgui_node_editor::EditorContext?; var pid : PinId&) : bool {
+    //! True (and writes pid) the frame the user right-clicks a pin. Records
+    //! {kind:"pin", pin:pid} on the editor. Call inside with_suspended.
+    var x = 0
+    let ok = imgui_node_editor::ShowPinContextMenu(safe_addr(x))
+    pid = x
+    if (ok) {
+        record_ctx_menu(ctx, CtxMenuState(kind = "pin", pin = x))
+    }
+    return ok
+}
+
+def show_link_context_menu(ctx : imgui_node_editor::EditorContext?; var lid : LinkId&) : bool {
+    //! True (and writes lid) the frame the user right-clicks a link. Records
+    //! {kind:"link", link:lid} on the editor. Call inside with_suspended.
+    var x = 0
+    let ok = imgui_node_editor::ShowLinkContextMenu(safe_addr(x))
+    lid = x
+    if (ok) {
+        record_ctx_menu(ctx, CtxMenuState(kind = "link", link = x))
+    }
+    return ok
 }

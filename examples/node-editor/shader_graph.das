@@ -52,6 +52,17 @@ var g_dbg_zoom     : float
 var g_dbg_s_origin : float2
 var g_dbg_s_far    : float2
 var g_request_navigate : bool = false
+var g_ctx_node : int = 0                               // node under a right-click (node context menu)
+var g_ctx_link : int = 0                               // link under a right-click (link context menu)
+var g_ctx_pos  : float2                                // canvas pos to place a context-menu-created node
+
+// Per-id NarrativeState slots for the loop-rendered title / pin-name text().
+// The plain text("foo") form shares ONE state global per source line, so every
+// loop iteration overwrites it and the snapshot collapses every node's value to
+// the last one rendered. Indexed text(TABLE[id], …) gives each id its own slot
+// (the data_table.das idiom) so per-node/per-pin telemetry is correct.
+var NODE_TITLE : table<int; NarrativeState>            // keyed by node id
+var PIN_LABEL  : table<int; NarrativeState>            // keyed by pin id (input + output ids are disjoint)
 
 // ===== graph construction =====
 
@@ -125,12 +136,22 @@ def remove_node(var g : Graph; nid : int) {
     delete link_ids
 }
 
+def spawn_node(var g : Graph; kind : NodeKind; pos : float2) : int {
+    // The single place that knows each kind's title + pin layout — shared by the
+    // sample graph, the toolbar buttons, and the right-click context menu.
+    return add_node(g, kind, "Texture",      pos, [], ["RGBA"]) if (kind == NodeKind.TexInput)
+    return add_node(g, kind, "Tint",         pos, [], ["Color"]) if (kind == NodeKind.ConstInput)
+    return add_node(g, kind, "Add",          pos, ["A", "B"], ["Out"]) if (kind == NodeKind.Add)
+    return add_node(g, kind, "Color Output", pos, ["Color"], []) if (kind == NodeKind.ColorOutput)
+    return add_node(g, kind, "Multiply",     pos, ["A", "B"], ["Out"])  // Mul
+}
+
 def build_sample_graph(var g : Graph) {
     g.next_id = 1
-    let tex  = add_node(g, NodeKind.TexInput,    "Texture",      float2(40.0,  40.0),  [], ["RGBA"])
-    let tint = add_node(g, NodeKind.ConstInput,  "Tint",         float2(40.0,  220.0), [], ["Color"])
-    let mul  = add_node(g, NodeKind.Mul,         "Multiply",     float2(340.0, 90.0),  ["A", "B"], ["Out"])
-    let outp = add_node(g, NodeKind.ColorOutput, "Color Output", float2(640.0, 120.0), ["Color"], [])
+    let tex  = spawn_node(g, NodeKind.TexInput,    float2(40.0,  40.0))
+    let tint = spawn_node(g, NodeKind.ConstInput,  float2(40.0,  220.0))
+    let mul  = spawn_node(g, NodeKind.Mul,         float2(340.0, 90.0))
+    let outp = spawn_node(g, NodeKind.ColorOutput, float2(640.0, 120.0))
     add_link(g, out_pin(g, tex,  0), in_pin(g, mul,  0))
     add_link(g, out_pin(g, tint, 0), in_pin(g, mul,  1))
     add_link(g, out_pin(g, mul,  0), in_pin(g, outp, 0))
@@ -138,12 +159,34 @@ def build_sample_graph(var g : Graph) {
 
 // ===== app toolbar (create / delete; app-specific, nothing generic) =====
 
+def toolbar_spawn(kind : NodeKind) {
+    // Cascade-place toolbar-created nodes. Runs OUTSIDE the node_editor block, so
+    // the bracketed set_node_position (SetCurrentEditor…null) is the right call.
+    let pos = float2(480.0 + float(g_spawn % 6) * 28.0, 380.0 + float(g_spawn % 6) * 28.0)
+    g_spawn = g_spawn + 1
+    let nid = spawn_node(g_graph, kind, pos)
+    set_node_position(g_ed, nid, pos)
+}
+
 def toolbar() {
-    if (button((text = "Add Node"))) {
-        let pos = float2(480.0 + float(g_spawn % 6) * 28.0, 380.0 + float(g_spawn % 6) * 28.0)
-        g_spawn = g_spawn + 1
-        let nid = add_node(g_graph, NodeKind.Mul, "Node", pos, ["A", "B"], ["Out"])
-        set_node_position(g_ed, nid, pos)
+    if (button((text = "+ Texture"))) {
+        toolbar_spawn(NodeKind.TexInput)
+    }
+    same_line()
+    if (button((text = "+ Tint"))) {
+        toolbar_spawn(NodeKind.ConstInput)
+    }
+    same_line()
+    if (button((text = "+ Multiply"))) {
+        toolbar_spawn(NodeKind.Mul)
+    }
+    same_line()
+    if (button((text = "+ Add"))) {
+        toolbar_spawn(NodeKind.Add)
+    }
+    same_line()
+    if (button((text = "+ Output"))) {
+        toolbar_spawn(NodeKind.ColorOutput)
     }
     same_line()
     if (button((text = "Delete Selected Node"))) {
@@ -173,6 +216,14 @@ def node_tint(kind : NodeKind) : float4 {
     return float4(-1.0, -1.0, -1.0, -1.0)
 }
 
+def ctx_spawn(kind : NodeKind) {
+    // Create a node from the right-click menu, placed at the cursor. Runs INSIDE
+    // the node_editor block (editor already current) → raw SetNodePosition, not
+    // the SetCurrentEditor-bracketed wrapper.
+    let nid = spawn_node(g_graph, kind, g_ctx_pos)
+    imgui_node_editor::SetNodePosition(nid, g_ctx_pos)
+}
+
 def draw_editor(var g : Graph) {
     node_editor("shader_graph", (editor = g_ed, size = float2(0.0, 0.0))) {
         g_dbg_canvas = imgui_node_editor::GetScreenSize()
@@ -186,15 +237,15 @@ def draw_editor(var g : Graph) {
                 imgui_node_editor::SetNodePosition(n.id, n.pos)
             }
             node(n.id, (color = node_tint(n.kind))) {
-                text("{n.title}")
+                text(NODE_TITLE[n.id], (text = n.title))
                 for (p in n.inputs) {
                     pin(p.id, PinKind.Input) {
-                        text("-> {p.name}")
+                        text(PIN_LABEL[p.id], (text = "-> {p.name}"))
                     }
                 }
                 for (p in n.outputs) {
                     pin(p.id, PinKind.Output) {
-                        text("{p.name} ->")
+                        text(PIN_LABEL[p.id], (text = "{p.name} ->"))
                     }
                 }
             }
@@ -236,6 +287,54 @@ def draw_editor(var g : Graph) {
             }
         }
 
+        // Right-click context menus. Detection + popups run in a Suspend/Resume
+        // island (screen space) per imgui-node-editor: background → create a node
+        // of the chosen kind at the cursor; node/link → delete.
+        with_suspended() {
+            var nid = 0
+            var lid = 0
+            if (show_node_context_menu(g_ed, nid)) {
+                g_ctx_node = nid
+                open_popup("ne_node_menu")
+            } elif (show_link_context_menu(g_ed, lid)) {
+                g_ctx_link = lid
+                open_popup("ne_link_menu")
+            } elif (show_background_context_menu(g_ed, g_ctx_pos)) {
+                open_popup("ne_bg_menu")
+            }
+            popup_window(NODE_CTX, (str_id = "ne_node_menu", flags = ImGuiWindowFlags.None)) {
+                if (menu_label(DEL_NODE, (text = "Delete Node"))) {
+                    remove_node(g, g_ctx_node)
+                }
+            }
+            popup_window(LINK_CTX, (str_id = "ne_link_menu", flags = ImGuiWindowFlags.None)) {
+                if (menu_label(DEL_LINK, (text = "Delete Link"))) {
+                    g.links |> erase(g_ctx_link)
+                }
+            }
+            // Explicit idents (CREATE_*) give the menu items stable snapshot paths
+            // (MAIN_WIN/shader_graph/BG_CTX/CREATE_*), which the context-menu test
+            // asserts to confirm the menu opened on right-click.
+            popup_window(BG_CTX, (str_id = "ne_bg_menu", flags = ImGuiWindowFlags.None)) {
+                text("Create Node")
+                if (menu_label(CREATE_TEX, (text = "Texture"))) {
+                    ctx_spawn(NodeKind.TexInput)
+                }
+                if (menu_label(CREATE_TINT, (text = "Tint"))) {
+                    ctx_spawn(NodeKind.ConstInput)
+                }
+                if (menu_label(CREATE_MUL, (text = "Multiply"))) {
+                    ctx_spawn(NodeKind.Mul)
+                }
+                if (menu_label(CREATE_ADD, (text = "Add"))) {
+                    ctx_spawn(NodeKind.Add)
+                }
+                if (menu_label(CREATE_OUT, (text = "Color Output"))) {
+                    ctx_spawn(NodeKind.ColorOutput)
+                }
+            }
+        }
+
         // NavigateToContent auto-call is DISABLED (DPI-broken under SCALE_TO_MONITOR,
         // see STATE.md). The `navigate_to_content` live command flips g_request_navigate.
         if (g_request_navigate) {
@@ -258,6 +357,7 @@ def init() {
 [export]
 def update() {
     if (!harness_begin_frame()) return
+    harness_apply_synth_io()    // drain synth mouse/key timelines (imgui_mouse_play etc.) + re-assert synth cursor over the real mouse
     harness_new_frame()
     // Fullscreen borderless host window (the imgui-node-editor framework pattern).
     let io & = unsafe(GetIO())
