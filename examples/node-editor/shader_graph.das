@@ -58,7 +58,7 @@ struct Graph {
 var g_graph : Graph
 var g_ed : imgui_node_editor::EditorContext? = null    // app owns the editor context(s)
 var g_spawn : int = 0                                  // cascade offset for newly-added nodes
-var g_nav_frames : int = 0
+var g_seeded : table<int>                              // node ids whose initial position has been pushed to the editor
 var g_dbg_canvas   : float2
 var g_dbg_zoom     : float
 var g_dbg_s_origin : float2
@@ -468,10 +468,15 @@ def draw_editor() {
             }
         }
         for (n in values(g_graph.nodes)) {
-            // Seed the initial position ONCE. After that the editor owns it
-            // (user drags, move_node command) — we never re-push from Node.pos.
-            if (g_nav_frames == 0) {
+            // Seed each node's initial position ONCE, inside the frame right before its
+            // BeginNode — the only reliable time. An out-of-frame SetNodePosition (e.g. from
+            // the paste handler, which runs after this block) on a not-yet-rendered node does
+            // NOT commit headless: GetNodePosition keeps returning the un-laid-out sentinel.
+            // Gating on a per-node seeded set (not frame 0) covers paste/toolbar/menu nodes too;
+            // after the first render the editor owns geometry (user drags, move_node command).
+            if (!key_exists(g_seeded, n.id)) {
                 imgui_node_editor::SetNodePosition(n.id, n.pos)
+                g_seeded |> insert(n.id)
             }
             if (n.kind == NodeKind.ColorOutput) {
                 // The output node showcases per-node rendering config: rounded corners via
@@ -636,7 +641,6 @@ def draw_editor() {
             imgui_node_editor::NavigateToContent(0.0)
             g_request_navigate = false
         }
-        g_nav_frames = g_nav_frames + 1
     }
     // Continuous flow on the most-recently connected link. Called AFTER the
     // node_editor block (editor no longer current) so flow()'s SetCurrentEditor

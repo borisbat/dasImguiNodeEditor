@@ -42,21 +42,34 @@ def test_clipboard(t : T?) {
         // GetNodeSize stays 0). Position commit lags the link draw by a frame (read 0 on macOS),
         // so we gate the poll on the final geometry: snapP != null IS the layout-preserved proof,
         // with no half-committed transient able to slip through.
+        // Paste — poll until link_20 is up and the two pasted nodes have committed their
+        // relative layout (~300px x / ~50px y apart, not stacked). Positions are seeded in-frame
+        // on first render, so they settle a frame or two after the paste shortcut; gating on the
+        // final geometry makes snapP != null itself the layout-preserved proof. An uncommitted
+        // node reads imgui-node-editor's un-laid-out sentinel (~INT_MIN), which the band rejects,
+        // so the poll only passes once BOTH nodes hold real, correctly-separated positions.
         ne_shortcut(s, "paste")
-        var snapP = ne_wait_widget(s, "link_20", 8.0f)
-        t |> success(snapP != null, "link_20 present after paste")
+        var snapP = wait_until_sec(d, 8.0f) $(var snap) {
+            if (!widget_exists(snap, "{s.canvas}/link_20")) return false
+            let other = widget_exists(snap, "{s.canvas}/node_16") ? 16 : 18
+            let bA = find_widget(snap, "{s.canvas}/node_14")?["payload"]?["bbox"]
+            let bB = find_widget(snap, "{s.canvas}/node_{other}")?["payload"]?["bbox"]
+            var dx = (bA?["x"] ?? 0.0) - (bB?["x"] ?? 0.0)
+            var dy = (bA?["y"] ?? 0.0) - (bB?["y"] ?? 0.0)
+            if (dx < 0.0) {
+                dx = -dx
+            }
+            if (dy < 0.0) {
+                dy = -dy
+            }
+            return dx > 250.0 && dx < 350.0 && dy > 20.0 && dy < 80.0
+        }
+        t |> success(snapP != null,
+                     "paste preserved layout: pasted nodes ~300px x / ~50px y apart (not stacked), link_20 up")
         t |> equal(ne_node_count(s), 6, "paste added both nodes (4 -> 6)")
 
-        // DIAGNOSTIC: dump every candidate node's existence + canvas position so CI shows the
-        // real values (local Windows passes, headless CI does not — need to see what differs).
         if (snapP != null) {
-            for (nid in [1, 5, 14, 15, 16, 17, 18]) {
-                let ex = widget_exists(snapP, "{s.canvas}/node_{nid}")
-                let bb = find_widget(snapP, "{s.canvas}/node_{nid}")?["payload"]?["bbox"]
-                let bx = bb?["x"] ?? -999.0
-                let by = bb?["y"] ?? -999.0
-                print("DIAG node_{nid}: exists={ex} x={bx} y={by}\n")
-            }
+            // The copied link connects two PASTED pins (fresh ids >= 15, not the originals <= 10).
             var l20 = find_widget(snapP, "{s.canvas}/link_20")
             t |> success((l20?["payload"]?["from_pin"] ?? 0) >= 15 && (l20?["payload"]?["to_pin"] ?? 0) >= 15,
                          "copied link joins the pasted nodes, not the originals")

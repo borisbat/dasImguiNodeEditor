@@ -231,7 +231,7 @@ in shutdown). `Node.pos` is INITIAL SEED ONLY — editor owns position after pla
 // titles/pin-names get a per-id telemetry slot (see "snapshot telemetry" below).
 node_editor("shader_graph", (editor = g_ed, size = float2(0.0, 0.0))) {
     for (n in values(g.nodes)) {
-        if (g_nav_frames == 0) { SetNodePosition(n.id, n.pos) }   // seed once; never re-push
+        if (!key_exists(g_seeded, n.id)) { SetNodePosition(n.id, n.pos); g_seeded |> insert(n.id) }   // seed once, in-frame (per-node, not frame-0)
         node(n.id, (color = node_tint(n.kind))) {
             text(NODE_TITLE[n.id], (text = n.title))
             for (p in n.inputs)  { pin(p.id, PinKind.Input)  { text(PIN_LABEL[p.id], (text = "-> {p.name}")) } }
