@@ -571,7 +571,13 @@ def draw_editor() {
                 g_shortcut_action = "paste"
                 // Capture the cursor in canvas space NOW (editor is current; ScreenToCanvas
                 // needs it). handle_shortcut_action runs post-block where it'd be unavailable.
-                g_paste_anchor = imgui_node_editor::ScreenToCanvas(GetMousePos())
+                // Guard the mouse: a keyboard Ctrl+V with no on-canvas cursor (and every headless
+                // frame, where IsMousePosValid is false) yields a -FLT_MAX GetMousePos, which
+                // ScreenToCanvas turns into a garbage anchor. Fall back to just past the copied
+                // cluster — the same offset duplicate uses.
+                g_paste_anchor = (is_mouse_pos_valid()
+                    ? imgui_node_editor::ScreenToCanvas(GetMousePos())
+                    : g_clip_origin + float2(30.0, 30.0))
             } elif (accept_duplicate(g_ed)) {
                 g_shortcut_action = "duplicate"
             }
