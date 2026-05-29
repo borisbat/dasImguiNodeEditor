@@ -3,8 +3,8 @@
 Working notes for the in-progress port of dasImguiNodeEditor onto the **dasImgui v2 API**
 (dasImgui is the template; goal is full parity — v2 wrappers, live, docs/Pages, tests, CI).
 
-Last updated: 2026-05-29. **PRs #1–#3 MERGED to master; #4 (this branch) in review.** All CI-green
-(ubuntu/macos/windows):
+Last updated: 2026-05-29. **PRs #1–#5 MERGED to master; #6 (this branch
+`bbatkin/node-editor-api-completion`) in progress.** All CI-green (ubuntu/macos/windows):
 - **#1** — whole v2 surface: id-only node/pin/link + multi-editor app-owned ctx + move_node +
   selection + `selected` in snapshot; `imgui_node_editor_live` live commands; queue-injectable
   CREATE (begin_create/query_new_link/accept_new_item/reject_new_item) and DELETE (begin_delete +
@@ -15,9 +15,19 @@ Last updated: 2026-05-29. **PRs #1–#3 MERGED to master; #4 (this branch) in re
   widgets; the id is the forwarded arg0.
 - **#3** — node_editor lazy serialize payload (drops per-frame JV), call-form tests (tuple +
   non-tuple), raw-native lint `NODEEDITOR001`.
-- **#4** (this branch `bbatkin/node-editor-context-menus`) — right-click context menus (events, not
-  scopes) + all 5 node types via toolbar + context menu + the `harness_apply_synth_io()` synth-drain
-  fix + the indexed-`text` snapshot-telemetry fix + `CLAUDE.md`.
+- **#4** — right-click context menus (events, not scopes) + all 5 node types via toolbar + context
+  menu + the `harness_apply_synth_io()` synth-drain fix + the indexed-`text` snapshot-telemetry fix
+  + `CLAUDE.md`.
+- **#5** — node-creation-by-drag (`show_new_node_drag` + `enqueue_new_node_drag` + `new_node_drag_cmd`
+  + filtered create-menu + connect-on-select) and link flow (`flow` one-shot pulse + `flow_cmd`);
+  `test_new_node_drag.das` + `test_flow.das`.
+- **#6** (this branch) — **groups + the non-telemetry rail backfill.** Telemetry: `node_group`
+  entity (kind `node_group`, reuses node_payload) + `set_group_size`; z folds into `node_payload`.
+  Non-telemetry: `with_style_var`, pin pivot config on `pin()`, `with_node_background_drawlist`
+  (call after the node block), view ops `center_node_on_screen`/`navigate_to_selection`/
+  `restore_node_state`/`set_node_z_position` + their live commands, `get_ordered_node_ids` +
+  `ordered_node_ids_cmd`. Demoed in `shader_graph.das`; `test_node_group.das` + `test_node_ops.das`.
+  Remaining backlog: clipboard/shortcuts (the largest native chunk, telemetry-bearing — its own PR).
 
 ## Key files
 

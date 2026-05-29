@@ -37,8 +37,19 @@ struct Link {
     to_pin   : int
 }
 
+// A group / comment box — a pin-less node that visually corrals the nodes dragged
+// onto it (they move with the group). Geometry is editor-owned after the initial
+// seed, exactly like Node.pos.
+struct GroupBox {
+    id    : int
+    title : string
+    pos   : float2          // INITIAL position only
+    size  : float2          // content size passed to group()
+}
+
 struct Graph {
     nodes   : table<int; Node>
+    groups  : table<int; GroupBox>
     links   : table<int; Link>
     next_id : int
 }
@@ -65,6 +76,7 @@ var g_last_link : int = 0                              // most-recently connecte
 // (the data_table.das idiom) so per-node/per-pin telemetry is correct.
 var NODE_TITLE : table<int; NarrativeState>            // keyed by node id
 var PIN_LABEL  : table<int; NarrativeState>            // keyed by pin id (input + output ids are disjoint)
+var GROUP_TITLE : table<int; NarrativeState>          // keyed by group id (disjoint — shared alloc_id)
 
 // ===== graph construction =====
 
@@ -88,6 +100,12 @@ def add_node(var g : Graph; kind : NodeKind; title : string; pos : float2;
     }
     g.nodes[nid] <- n
     return nid
+}
+
+def add_group(var g : Graph; title : string; pos : float2; size : float2) : int {
+    let gid = alloc_id(g)
+    g.groups[gid] = GroupBox(id = gid, title = title, pos = pos, size = size)
+    return gid
 }
 
 def out_pin(var g : Graph; nid : int; i : int) : int {
@@ -119,6 +137,11 @@ def add_link(var g : Graph; from_pin : int; to_pin : int) {
 }
 
 def remove_node(var g : Graph; nid : int) {
+    // A group is a node to the editor, so begin_delete reports its id here too.
+    if (key_exists(g.groups, nid)) {
+        g.groups |> erase(nid)
+        return
+    }
     return if (!key_exists(g.nodes, nid))
     var dead_pins : table<int>
     for (p in g.nodes[nid].inputs) {
@@ -171,6 +194,17 @@ def toolbar_spawn(kind : NodeKind) {
     set_node_position(g_ed, nid, pos)
 }
 
+def spawn_group(title : string; pos : float2; size : float2) : int {
+    // Both pos and size are ONE-TIME seeds — the editor owns group geometry after the first
+    // frame. node_group passes gr.size only until the node becomes a group; thereafter the
+    // editor's stored bounds win and gr.size is ignored. pos seeded via the bracketed
+    // set_node_position (toolbar runs outside the node_editor block); to resize a group
+    // later, call set_group_size — mutating GroupBox.size alone won't do it.
+    let gid = add_group(g_graph, title, pos, size)
+    set_node_position(g_ed, gid, pos)
+    return gid
+}
+
 def toolbar() {
     if (button((text = "+ Texture"))) {
         toolbar_spawn(NodeKind.TexInput)
@@ -192,6 +226,12 @@ def toolbar() {
         toolbar_spawn(NodeKind.ColorOutput)
     }
     same_line()
+    if (button((text = "+ Group"))) {
+        let pos = float2(480.0 + float(g_spawn % 6) * 28.0, 380.0 + float(g_spawn % 6) * 28.0)
+        g_spawn = g_spawn + 1
+        spawn_group("Group", pos, float2(220.0, 160.0))
+    }
+    same_line()
     if (button((text = "Delete Selected Node"))) {
         var sel <- get_selected_nodes(g_ed)
         for (nid in sel) {
@@ -206,6 +246,20 @@ def toolbar() {
             g_graph.links |> erase(lid)
         }
         delete sel
+    }
+    same_line()
+    if (button((text = "Center Selected"))) {
+        // View actions run outside the node_editor block → bracketed wrappers. (May
+        // share NavigateToContent's SCALE_TO_MONITOR/DPI quirk; see g_request_navigate.)
+        var sel <- get_selected_nodes(g_ed)
+        if (!empty(sel)) {
+            center_node_on_screen(g_ed, sel[0])
+        }
+        delete sel
+    }
+    same_line()
+    if (button((text = "Frame Selection"))) {
+        navigate_to_selection(g_ed, false, -1.0)
     }
 }
 
@@ -255,6 +309,23 @@ def ctx_spawn(kind : NodeKind) {
     }
 }
 
+def render_node_body(n : Node) {
+    // Shared by the plain + output-node render paths. Pin pivots place the link-attach
+    // point on the node's edge — inputs on the left, outputs on the right — so links
+    // leave/arrive cleanly instead of from the pin's center.
+    text(NODE_TITLE[n.id], (text = n.title))
+    for (p in n.inputs) {
+        pin(p.id, (kind = PinKind.Input, pivot_alignment = float2(0.0, 0.5))) {
+            text(PIN_LABEL[p.id], (text = "-> {p.name}"))
+        }
+    }
+    for (p in n.outputs) {
+        pin(p.id, (kind = PinKind.Output, pivot_alignment = float2(1.0, 0.5))) {
+            text(PIN_LABEL[p.id], (text = "{p.name} ->"))
+        }
+    }
+}
+
 // Single-graph demo: the app owns ONE Graph (g_graph) and ONE editor (g_ed), so
 // draw_editor + the toolbar/context-menu spawn helpers all act on those globals.
 // A multi-graph app would thread its Graph + ctx through these instead.
@@ -264,23 +335,37 @@ def draw_editor() {
         g_dbg_zoom = imgui_node_editor::GetCurrentZoom()
         g_dbg_s_origin = imgui_node_editor::CanvasToScreen(float2(0.0, 0.0))
         g_dbg_s_far = imgui_node_editor::CanvasToScreen(float2(1000.0, 1000.0))
+        // Groups draw first so regular nodes sit on top of them. A group is a pin-less
+        // node (group() = BeginNode + Group(size)); its title labels the box.
+        for (gr in values(g_graph.groups)) {
+            node_group(gr.id, (size = gr.size)) {
+                text(GROUP_TITLE[gr.id], (text = gr.title))
+            }
+        }
         for (n in values(g_graph.nodes)) {
             // Seed the initial position ONCE. After that the editor owns it
             // (user drags, move_node command) — we never re-push from Node.pos.
             if (g_nav_frames == 0) {
                 imgui_node_editor::SetNodePosition(n.id, n.pos)
             }
-            node(n.id, (color = node_tint(n.kind))) {
-                text(NODE_TITLE[n.id], (text = n.title))
-                for (p in n.inputs) {
-                    pin(p.id, PinKind.Input) {
-                        text(PIN_LABEL[p.id], (text = "-> {p.name}"))
+            if (n.kind == NodeKind.ColorOutput) {
+                // The output node showcases per-node rendering config: rounded corners via
+                // a scoped style var.
+                with_style_var(imgui_node_editor::StyleVar.NodeRounding, 10.0) {
+                    node(n.id, (color = node_tint(n.kind))) {
+                        render_node_body(n)
                     }
                 }
-                for (p in n.outputs) {
-                    pin(p.id, PinKind.Output) {
-                        text(PIN_LABEL[p.id], (text = "{p.name} ->"))
-                    }
+                // A custom accent stripe on its own background draw list — drawn AFTER the
+                // node block (the node's draw channels only exist once it's fully built).
+                with_node_background_drawlist(n.id) $(var dl) {
+                    let p = imgui_node_editor::GetNodePosition(n.id)
+                    let s = imgui_node_editor::GetNodeSize(n.id)
+                    dl |> add_rect_filled(p, float2(p.x + 5.0, p.y + s.y), rgba(255u, 90u, 90u, 220u))
+                }
+            } else {
+                node(n.id, (color = node_tint(n.kind))) {
+                    render_node_body(n)
                 }
             }
         }
@@ -443,6 +528,17 @@ def shutdown() {
 def navigate_to_content(input : JsonValue?) : JsonValue? {
     g_request_navigate = true
     return JV("queued")
+}
+
+[live_command(description = "Spawn a group/comment box: input title (string, optional), x, y, w, h (optional). Returns the new group id.")]
+def spawn_group_cmd(input : JsonValue?) : JsonValue? {
+    let title = input?["title"] ?? "Group"
+    let x = input?["x"] ?? 480.0
+    let y = input?["y"] ?? 380.0
+    let w = input?["w"] ?? 220.0
+    let h = input?["h"] ?? 160.0
+    let gid = spawn_group(title, float2(x, y), float2(w, h))
+    return JV((id = gid))
 }
 
 [live_command(description = "Editor display + framebuffer dimensions for debugging coverage")]
