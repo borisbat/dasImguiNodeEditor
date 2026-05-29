@@ -137,6 +137,68 @@ def flow(ctx : imgui_node_editor::EditorContext?; link_id : LinkId;
     return true
 }
 
+// ===== node ops + view navigation (transient; bracket SetCurrentEditor) =====
+//
+// Imperative editor actions with no observable state after they run (like flow) —
+// they move the viewport or a node's z-order, not graph topology. All bracket
+// SetCurrentEditor so they work from outside the draw loop (toolbar button, live
+// command). NavigateToContent stays a raw allow-listed call (the app owns the
+// SCALE_TO_MONITOR/DPI workaround — see shader_graph.das).
+
+def center_node_on_screen(ctx : imgui_node_editor::EditorContext?; id : NodeId) : bool {
+    //! Pan the viewport so `id` is centered. Transient view action (no zoom change);
+    //! no-op for a null ctx. (May share NavigateToContent's DPI quirk under
+    //! SCALE_TO_MONITOR — call inside the draw loop if the bracketed form mis-centers.)
+    return false if (ctx == null)
+    imgui_node_editor::SetCurrentEditor(ctx)
+    imgui_node_editor::CenterNodeOnScreen(id)
+    imgui_node_editor::SetCurrentEditor(null)
+    return true
+}
+
+def navigate_to_selection(ctx : imgui_node_editor::EditorContext?; zoom_in : bool = false;
+                          duration : float = -1.0) : bool {
+    //! Pan/zoom the viewport to frame the current selection over `duration` seconds
+    //! (negative = editor default). `zoom_in` also zooms to fit; no-op for a null ctx
+    //! (or empty selection — the editor no-ops internally).
+    return false if (ctx == null)
+    imgui_node_editor::SetCurrentEditor(ctx)
+    imgui_node_editor::NavigateToSelection(zoom_in, duration)
+    imgui_node_editor::SetCurrentEditor(null)
+    return true
+}
+
+def restore_node_state(ctx : imgui_node_editor::EditorContext?; id : NodeId) : bool {
+    //! Re-apply `id`'s saved state (position/size) from the editor's settings — undoes
+    //! an un-committed move. No-op for a null ctx.
+    return false if (ctx == null)
+    imgui_node_editor::SetCurrentEditor(ctx)
+    imgui_node_editor::RestoreNodeState(id)
+    imgui_node_editor::SetCurrentEditor(null)
+    return true
+}
+
+def set_node_z_position(ctx : imgui_node_editor::EditorContext?; id : NodeId; z : float) : bool {
+    //! Set `id`'s draw order (higher = on top). Observable: the z folds into node()'s
+    //! snapshot payload (node_payload). No-op for a null ctx.
+    return false if (ctx == null)
+    imgui_node_editor::SetCurrentEditor(ctx)
+    imgui_node_editor::SetNodeZPosition(id, z)
+    imgui_node_editor::SetCurrentEditor(null)
+    return true
+}
+
+def set_group_size(ctx : imgui_node_editor::EditorContext?; id : NodeId; size : float2) : bool {
+    //! Resize the group node `id` from outside the draw loop. The editor owns group
+    //! geometry after creation, so this is the group peer of set_node_position. The
+    //! result is observable via the group's snapshot bbox. No-op for a null ctx.
+    return false if (ctx == null)
+    imgui_node_editor::SetCurrentEditor(ctx)
+    imgui_node_editor::SetGroupSize(id, size)
+    imgui_node_editor::SetCurrentEditor(null)
+    return true
+}
+
 // ===== graph entities (node / pin / link) — id-keyed via forward_argument =====
 //
 // Each takes the editor's int id as the first arg, forwarded through the
@@ -199,8 +261,9 @@ def private node_payload(ctx : void?; id : int) : JsonValue? {
     let pos = imgui_node_editor::GetNodePosition(id)
     let sz = imgui_node_editor::GetNodeSize(id)
     let sel = imgui_node_editor::IsNodeSelected(id)
+    let z = imgui_node_editor::GetNodeZPosition(id)
     imgui_node_editor::SetCurrentEditor(null)
-    return JV((id = id, bbox = float4(pos.x, pos.y, pos.x + sz.x, pos.y + sz.y), selected = sel))
+    return JV((id = id, bbox = float4(pos.x, pos.y, pos.x + sz.x, pos.y + sz.y), selected = sel, z = z))
 }
 
 def private pin_payload(ctx : void?; id : int) : JsonValue? {
@@ -250,12 +313,47 @@ def node(id : NodeId; color : float4 = float4(-1.0, -1.0, -1.0, -1.0); blk : blo
 }
 
 [container(forward_argument=true)]
-def pin(id : PinId; kind : PinKind; blk : block) {
-    //! A node pin — `pin(id, kind){…}`. Registers as kind "pin"; payload {id} is
-    //! built lazily at snapshot (pin_payload). `kind` drives BeginPin but isn't
-    //! editor-queryable, so it's not in the payload. `widget_ident` is macro-injected
-    //! (= "pin_{id}").
+def node_group(id : NodeId; size : float2 = float2(200.0, 150.0); blk : block) {
+    //! A group / comment node — `node_group(id, (size = float2(w,h))){…}`. A group IS a
+    //! node that calls Group(size) right after BeginNode, so child nodes dragged onto it
+    //! move with it. The body typically renders the group title. Named node_group (not
+    //! group) to avoid colliding with imgui's BeginGroup/EndGroup `group` container.
+    //! Registers as kind "node_group"; payload {id, bbox, selected, z} is built lazily at
+    //! snapshot via node_payload (a group is geometrically a node — same bbox/selection/z
+    //! surface), so a test can assert the group's bounds. `widget_ident` is macro-injected
+    //! (= "node_group_{id}").
+    imgui_node_editor::BeginNode(id)
+    imgui_node_editor::Group(size)
+    invoke(blk)
+    imgui_node_editor::EndNode()
+    var entry : WidgetEntry
+    let pos = imgui_node_editor::GetNodePosition(id)
+    let sz = imgui_node_editor::GetNodeSize(id)
+    entry.bbox = float4(pos.x, pos.y, pos.x + sz.x, pos.y + sz.y)
+    entry.serialize_id = id
+    entry.serialize_ctx = g_active_editor
+    entry.serialize = @@node_payload
+    finalize_entity(widget_ident, "node_group", entry)
+}
+
+[container(forward_argument=true)]
+def pin(id : PinId; kind : PinKind;
+        pivot_alignment : float2 = float2(-1.0, -1.0);
+        pivot_size : float2 = float2(-1.0, -1.0); blk : block) {
+    //! A node pin — `pin(id, kind){…}`, or with geometry config via the tuple form
+    //! `pin(id, (kind = PinKind.Output, pivot_alignment = float2(1.0, 0.5)))`. `kind`
+    //! drives BeginPin. pivot_alignment (0..1 within the pin rect) and pivot_size place
+    //! the link-attach point — e.g. align an output pin's pivot to its right edge so
+    //! links leave the node cleanly; a negative x (the -1 default) keeps the editor
+    //! default. Registers as kind "pin"; payload {id} is built lazily (pin_payload).
+    //! `widget_ident` is macro-injected (= "pin_{id}").
     imgui_node_editor::BeginPin(id, kind)
+    if (pivot_alignment.x >= 0.0) {
+        imgui_node_editor::PinPivotAlignment(pivot_alignment)
+    }
+    if (pivot_size.x >= 0.0) {
+        imgui_node_editor::PinPivotSize(pivot_size)
+    }
     invoke(blk)
     imgui_node_editor::EndPin()
     var entry : WidgetEntry
@@ -279,6 +377,39 @@ def link(id : LinkId; from : PinId; to : PinId;
     entry.serialize_ctx = g_active_editor
     entry.serialize = @@link_payload
     finalize_entity_leaf(widget_ident, "link", entry)
+}
+
+// ===== rendering config (style-var stack + custom node background) =====
+
+def with_style_var(style_var : imgui_node_editor::StyleVar; value : float; blk : block) {
+    //! Bracket PushStyleVar/PopStyleVar(1) around the body for a node-editor style var
+    //! (e.g. StyleVar.NodeRounding, StyleVar.NodeBorderWidth). Overloaded for float /
+    //! float2 / float4 values. Pure rendering config — no snapshot state.
+    imgui_node_editor::PushStyleVar(style_var, value)
+    invoke(blk)
+    imgui_node_editor::PopStyleVar(1)
+}
+
+def with_style_var(style_var : imgui_node_editor::StyleVar; value : float2; blk : block) {
+    imgui_node_editor::PushStyleVar(style_var, value)
+    invoke(blk)
+    imgui_node_editor::PopStyleVar(1)
+}
+
+def with_style_var(style_var : imgui_node_editor::StyleVar; value : float4; blk : block) {
+    imgui_node_editor::PushStyleVar(style_var, value)
+    invoke(blk)
+    imgui_node_editor::PopStyleVar(1)
+}
+
+def with_node_background_drawlist(id : NodeId; blk : block<(var dl : ImDrawList?) : void>) {
+    //! Hand the body node `id`'s background draw list to paint custom art BEHIND the node
+    //! (mirrors dasImgui's with_*_drawlist). Feed `dl` to the imgui drawlist primitives
+    //! (add_rect_filled, add_line, …). Call it AFTER the node()/group() block (the node
+    //! must be fully built — its draw channels only exist post-EndNode; calling mid-body
+    //! crashes), still inside the node_editor() block. Decorative — no snapshot state.
+    var dl = imgui_node_editor::GetNodeBackgroundDrawList(id)
+    invoke(blk, dl)
 }
 
 // ===== link creation (queue-injectable; drivable via live) =====
@@ -674,6 +805,28 @@ def get_selected_links(ctx : imgui_node_editor::EditorContext?) : array<LinkId> 
             n = imgui_node_editor::GetSelectedLinks(reinterpret<LinkId?>(addr(buf[0])), count)
         }
         result <- [for (i in range(n)); LinkId(intptr(buf[i]))]
+        delete buf
+    }
+    imgui_node_editor::SetCurrentEditor(null)
+    return <- result
+}
+
+def get_ordered_node_ids(ctx : imgui_node_editor::EditorContext?) : array<NodeId> {
+    //! All node ids in the editor's current draw order (back-to-front). Pure read; same
+    //! bracketing + out-buffer pattern as get_selected_nodes (capacity = GetNodeCount).
+    //! Walk it top-down for hit-testing, or persist it to restore z-order.
+    var result : array<NodeId>
+    return <- result if (ctx == null)
+    imgui_node_editor::SetCurrentEditor(ctx)
+    let count = imgui_node_editor::GetNodeCount()
+    if (count > 0) {
+        var buf : array<void?>
+        buf |> resize(count)
+        var n = 0
+        unsafe {
+            n = imgui_node_editor::GetOrderedNodeIds(reinterpret<NodeId?>(addr(buf[0])), count)
+        }
+        result <- [for (i in range(n)); NodeId(intptr(buf[i]))]
         delete buf
     }
     imgui_node_editor::SetCurrentEditor(null)

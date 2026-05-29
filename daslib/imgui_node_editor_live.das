@@ -100,3 +100,57 @@ def flow_cmd(input : JsonValue?) : JsonValue? {
     return JV("flowing link {id}") if (flow(handle_to_editor(handle), id, dir))
     return JV("not flowed (null editor)")
 }
+
+[live_command(description = "Center a node in the viewport: input editor (handle), id (node id).")]
+def center_node_cmd(input : JsonValue?) : JsonValue? {
+    let handle = input?["editor"] ?? uint64(0)
+    let id = input?["id"] ?? 0
+    return JV("centered node {id}") if (center_node_on_screen(handle_to_editor(handle), id))
+    return JV("not centered (null editor)")
+}
+
+[live_command(description = "Pan/zoom the viewport to frame the current selection: input editor (handle), zoom_in (bool, optional), duration (float seconds, optional — negative = editor default).")]
+def navigate_to_selection_cmd(input : JsonValue?) : JsonValue? {
+    let handle = input?["editor"] ?? uint64(0)
+    let zoom_in = input?["zoom_in"] ?? false
+    let duration = input?["duration"] ?? -1.0
+    return JV("navigated to selection") if (navigate_to_selection(handle_to_editor(handle), zoom_in, duration))
+    return JV("not navigated (null editor)")
+}
+
+[live_command(description = "Restore a node's saved position/size from editor settings: input editor (handle), id (node id).")]
+def restore_node_state_cmd(input : JsonValue?) : JsonValue? {
+    let handle = input?["editor"] ?? uint64(0)
+    let id = input?["id"] ?? 0
+    return JV("restored node {id}") if (restore_node_state(handle_to_editor(handle), id))
+    return JV("not restored (null editor)")
+}
+
+[live_command(description = "Set a node's draw order: input editor (handle), id (node id), z (float — higher draws on top).")]
+def set_node_z_cmd(input : JsonValue?) : JsonValue? {
+    let handle = input?["editor"] ?? uint64(0)
+    let id = input?["id"] ?? 0
+    let z = input?["z"] ?? 0.0
+    return JV("set node {id} z = {z}") if (set_node_z_position(handle_to_editor(handle), id, z))
+    return JV("not set (null editor)")
+}
+
+[live_command(description = "Resize a group node: input editor (handle), id (group node id), w, h (size).")]
+def set_group_size_cmd(input : JsonValue?) : JsonValue? {
+    let handle = input?["editor"] ?? uint64(0)
+    let id = input?["id"] ?? 0
+    let w = input?["w"] ?? 0.0
+    let h = input?["h"] ?? 0.0
+    return JV("set group {id} size ({w}, {h})") if (set_group_size(handle_to_editor(handle), id, float2(w, h)))
+    return JV("not set (null editor)")
+}
+
+[live_command(description = "List node ids in editor draw order (back-to-front): input editor (handle). Returns count + ids array.")]
+def ordered_node_ids_cmd(input : JsonValue?) : JsonValue? {
+    let handle = input?["editor"] ?? uint64(0)
+    var ids <- get_ordered_node_ids(handle_to_editor(handle))
+    let n = length(ids)
+    var arr = JV(ids)    // copies the ids into a fresh JSON array — ids can be freed after
+    delete ids
+    return JV((count = n, ids = arr))
+}

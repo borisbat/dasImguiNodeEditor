@@ -68,15 +68,18 @@ editor id that crosses the live/JSON boundary; `handle_to_editor(uint64)` revers
       node(n.id, (color = tint)) {                 // color tuple optional → editor default
           text(NODE_TITLE[n.id], (text = n.title))  // indexed text — see Gotchas
           pin(p.id, PinKind.Input)  { text(PIN_LABEL[p.id], (text = "-> {p.name}")) }
-          pin(p.id, PinKind.Output) { text(PIN_LABEL[p.id], (text = "{p.name} ->")) }
+          // pin pivot tuple optional — place the link-attach point on the pin edge:
+          pin(p.id, (kind = PinKind.Output, pivot_alignment = float2(1.0, 0.5))) { … }
       }
+      node_group(g.id, (size = float2(220.0, 160.0))) { text(GROUP_TITLE[g.id], (text=g.title)) }
       link(l.id, (from = l.from_pin, to = l.to_pin))  // also link(id, from, to) positional
   }
   ```
-  Snapshot payloads: node `{id, bbox, selected}`, pin `{id, kind}`, link `{id, from_pin,
-  to_pin, selected}`, node_editor `{handle, last_context_kind, last_node/pin/link/
-  background_context_menu}`. Built by the body, not reflected (the wrappers pass `null`
-  state to finalize, so the hand-built payload survives verbatim).
+  Snapshot payloads: node/node_group `{id, bbox, selected, z}` (a group is geometrically a
+  node — same lazy `node_payload`), pin `{id}` (imgui-node-editor exposes no pin-kind query),
+  link `{id, from_pin, to_pin, selected}`, node_editor `{handle, last_context_kind,
+  last_node/pin/link/background_context_menu, last_new_node_drag_*}`. Built lazily at snapshot
+  via the entry's `serialize` hook (re-derived from editor + id), not stored per frame.
 - **Node geometry is editor-owned.** `node.pos` is an INITIAL seed only — push it once via
   `set_node_position(ctx, id, pos)` then never read it back; the editor owns position after.
 - **Create (queue-injectable):** `begin_create(ctx){…}` + `query_new_link(ctx, var from&,
@@ -92,7 +95,23 @@ editor id that crosses the live/JSON boundary; `handle_to_editor(uint64)` revers
   `clear_pending_deletes(ctx)` flushes.
 - **Selection:** `get_selected_nodes(ctx) : array<NodeId>` / `get_selected_links(ctx)`,
   `select_node(ctx, id, on)` / `select_link(ctx, id, on)` (`on`=append), `clear_selection(ctx)`.
-  Pins are not selectable in imgui-node-editor.
+  Pins are not selectable in imgui-node-editor. `get_ordered_node_ids(ctx) : array<NodeId>`
+  enumerates draw order (back-to-front).
+- **Groups / comment boxes:** `node_group(id, (size=…)){…}` — a pin-less node that calls
+  `Group(size)`; child nodes dragged onto it move with it. First-class telemetry entity (kind
+  `node_group`, distinct path `node_group_{id}`, reuses `node_payload`). Named `node_group`
+  (NOT `group`) to avoid colliding with imgui's `BeginGroup`/`EndGroup` `group` container.
+  `set_group_size(ctx, id, size)` resizes from outside the draw loop (peer of
+  `set_node_position`; in the example, group size is app-model-owned and re-asserted per frame).
+- **Node ops + view (transient — no snapshot state, but live-drivable):**
+  `center_node_on_screen(ctx, id)`, `navigate_to_selection(ctx, zoom_in=false, duration=-1.0)`,
+  `restore_node_state(ctx, id)`, `set_node_z_position(ctx, id, z)` (z DOES reflect — folds into
+  `node_payload`). All bracket `SetCurrentEditor` (callable outside the draw loop); the
+  navigation pair may share `NavigateToContent`'s DPI quirk (Gotchas #5).
+- **Rendering config:** `with_style_var(StyleVar, value){…}` (float/float2/float4 overloads)
+  brackets PushStyleVar/PopStyleVar. `with_node_background_drawlist(id) $(var dl){…}` hands a
+  node's background draw list for custom art — **call it AFTER the node()/group() block**, not
+  inside (Gotchas #8).
 - **Context menus are EVENTS, not scopes** (see Gotchas): `with_suspended() { … }` brackets
   Suspend/Resume (screen space), and inside it `show_node_context_menu(ctx, var nid&)` /
   `show_pin_context_menu(ctx, var pid&)` / `show_link_context_menu(ctx, var lid&)` /
@@ -106,7 +125,9 @@ editor id that crosses the live/JSON boundary; `handle_to_editor(uint64)` revers
 
 Project-agnostic — target any graph by `editor` handle (`intptr(ctx)` from the snapshot) +
 entity id: `move_node`, `select_node_cmd`, `select_link_cmd`, `add_link_cmd`,
-`clear_pending_links_cmd`, `delete_node_cmd`, `delete_link_cmd`, `clear_pending_deletes_cmd`.
+`clear_pending_links_cmd`, `delete_node_cmd`, `delete_link_cmd`, `clear_pending_deletes_cmd`,
+`new_node_drag_cmd`, `flow_cmd`, `center_node_cmd`, `navigate_to_selection_cmd`,
+`restore_node_state_cmd`, `set_node_z_cmd`, `set_group_size_cmd`, `ordered_node_ids_cmd`.
 For synth mouse/keyboard use dasImgui's commands — prefer the high-level
 `imgui_mouse_click_at {x, y, button}` (button `1` = right-click) and `set_user_control
 {enabled:false/true}` to cleanly own input during automation.
@@ -159,3 +180,12 @@ stale `daslang`/`daslang-live`/`dastest` procs between runs (port 9090 reuse). C
 6. **`handle_to_editor` blindly reinterprets a uint64 → pointer** — a bad handle crashes. Fine
    for a live dev tool (the handle comes from a snapshot); validate via a registry if hardened.
 7. **pin/link `bbox` is zero** — imgui-node-editor exposes no pin/link geometry query (node only).
+8. **`with_node_background_drawlist` must be called AFTER the `node()`/`group()` block**, not
+   inside it. A node's draw channels only exist once it's fully built (post-`EndNode`); calling
+   `GetNodeBackgroundDrawList` mid-body hits an unallocated `ImDrawListSplitter` and crashes
+   (`SetCurrentChannel` null-write). The example draws the output-node accent after its block,
+   still inside `node_editor()`. (The blueprints reference app does the same.)
+9. **`group` is taken by imgui** (`BeginGroup`/`EndGroup`, pulled in via `require imgui public`).
+   The node-editor group entity is `node_group` — defining a `group` here is `error[30607]
+   ambiguous_macro`. Same rule for any future entity whose natural name collides with a dasImgui
+   widget/container macro: prefix it (`node_*`).
