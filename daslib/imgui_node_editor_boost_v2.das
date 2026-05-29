@@ -659,8 +659,8 @@ def show_node_context_menu(ctx : imgui_node_editor::EditorContext?; var nid : No
     //! {kind:"node", node:nid} on the editor. Call inside with_suspended.
     var x = 0
     let ok = imgui_node_editor::ShowNodeContextMenu(safe_addr(x))
-    nid = x
     if (ok) {
+        nid = x
         record_ctx_menu(ctx, CtxMenuState(kind = "node", node = x))
     }
     return ok
@@ -671,8 +671,8 @@ def show_pin_context_menu(ctx : imgui_node_editor::EditorContext?; var pid : Pin
     //! {kind:"pin", pin:pid} on the editor. Call inside with_suspended.
     var x = 0
     let ok = imgui_node_editor::ShowPinContextMenu(safe_addr(x))
-    pid = x
     if (ok) {
+        pid = x
         record_ctx_menu(ctx, CtxMenuState(kind = "pin", pin = x))
     }
     return ok
@@ -683,8 +683,8 @@ def show_link_context_menu(ctx : imgui_node_editor::EditorContext?; var lid : Li
     //! {kind:"link", link:lid} on the editor. Call inside with_suspended.
     var x = 0
     let ok = imgui_node_editor::ShowLinkContextMenu(safe_addr(x))
-    lid = x
     if (ok) {
+        lid = x
         record_ctx_menu(ctx, CtxMenuState(kind = "link", link = x))
     }
     return ok

@@ -224,13 +224,16 @@ def ctx_spawn(kind : NodeKind) {
     imgui_node_editor::SetNodePosition(nid, g_ctx_pos)
 }
 
-def draw_editor(var g : Graph) {
+// Single-graph demo: the app owns ONE Graph (g_graph) and ONE editor (g_ed), so
+// draw_editor + the toolbar/context-menu spawn helpers all act on those globals.
+// A multi-graph app would thread its Graph + ctx through these instead.
+def draw_editor() {
     node_editor("shader_graph", (editor = g_ed, size = float2(0.0, 0.0))) {
         g_dbg_canvas = imgui_node_editor::GetScreenSize()
         g_dbg_zoom = imgui_node_editor::GetCurrentZoom()
         g_dbg_s_origin = imgui_node_editor::CanvasToScreen(float2(0.0, 0.0))
         g_dbg_s_far = imgui_node_editor::CanvasToScreen(float2(1000.0, 1000.0))
-        for (n in values(g.nodes)) {
+        for (n in values(g_graph.nodes)) {
             // Seed the initial position ONCE. After that the editor owns it
             // (user drags, move_node command) — we never re-push from Node.pos.
             if (g_nav_frames == 0) {
@@ -250,7 +253,7 @@ def draw_editor(var g : Graph) {
                 }
             }
         }
-        for (l in values(g.links)) {
+        for (l in values(g_graph.links)) {
             link(l.id, (from = l.from_pin, to = l.to_pin))
         }
 
@@ -261,9 +264,9 @@ def draw_editor(var g : Graph) {
                 if (a != 0 && b != 0) {
                     // Validity gates accept-vs-reject (called every frame); accept's
                     // bool return gates the actual commit.
-                    if (valid_link(g, a, b)) {
+                    if (valid_link(g_graph, a, b)) {
                         if (accept_new_item(g_ed)) {
-                            add_link(g, a, b)
+                            add_link(g_graph, a, b)
                         }
                     } else {
                         reject_new_item(g_ed)
@@ -276,13 +279,13 @@ def draw_editor(var g : Graph) {
             var lid = 0
             while (query_deleted_link(g_ed, lid)) {
                 if (accept_deleted_link(g_ed)) {
-                    g.links |> erase(lid)
+                    g_graph.links |> erase(lid)
                 }
             }
             var nid = 0
             while (query_deleted_node(g_ed, nid)) {
                 if (accept_deleted_node(g_ed)) {
-                    remove_node(g, nid)
+                    remove_node(g_graph, nid)
                 }
             }
         }
@@ -304,12 +307,12 @@ def draw_editor(var g : Graph) {
             }
             popup_window(NODE_CTX, (str_id = "ne_node_menu", flags = ImGuiWindowFlags.None)) {
                 if (menu_label(DEL_NODE, (text = "Delete Node"))) {
-                    remove_node(g, g_ctx_node)
+                    remove_node(g_graph, g_ctx_node)
                 }
             }
             popup_window(LINK_CTX, (str_id = "ne_link_menu", flags = ImGuiWindowFlags.None)) {
                 if (menu_label(DEL_LINK, (text = "Delete Link"))) {
-                    g.links |> erase(g_ctx_link)
+                    g_graph.links |> erase(g_ctx_link)
                 }
             }
             // Explicit idents (CREATE_*) give the menu items stable snapshot paths
@@ -369,7 +372,7 @@ def update() {
                  ImGuiWindowFlags.NoBringToFrontOnFocus)
     window(MAIN_WIN, (text = "Shader Graph", closable = false, flags = flags)) {
         toolbar()
-        draw_editor(g_graph)
+        draw_editor()
     }
     harness_end_frame()
 }
