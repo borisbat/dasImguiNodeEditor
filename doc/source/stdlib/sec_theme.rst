@@ -5,7 +5,7 @@ Canvas theme
 *************
 
 A daslang-styled canvas theme — colors and style vars that match the daslang
-look, appliable either to a ``Style`` reference or directly to a live editor.
+look, applicable either to a ``Style`` reference or directly to a live editor.
 
 .. toctree::
 

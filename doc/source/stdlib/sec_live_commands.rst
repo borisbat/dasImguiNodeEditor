@@ -5,7 +5,7 @@ Live commands
 *************
 
 The ``imgui_node_editor_live`` module registers project-agnostic
-``[live_command]`` s. Each takes a JSON object with ``editor`` — the editor handle
+``[live_command]`` functions. Each takes a JSON object with ``editor`` — the editor handle
 (``intptr(ctx)``, surfaced in the ``node_editor`` snapshot payload) — plus the
 fields below, and drives the matching :ref:`boost v2
 <stdlib_node_editor_boost_v2_section>` entry point. So an external driver
