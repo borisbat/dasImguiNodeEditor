@@ -2,3 +2,19 @@
 *.lib
 *.exp
 _build/
+
+# Sphinx: generated API pages (emitted by utils/node_editor2rst.das) are never
+# tracked. Handmade material — sec_*.rst, index.rst, external_types.rst, and
+# stdlib/handmade/ — IS tracked.
+doc/source/stdlib/generated/
+doc/build/
+doc/source/__pycache__/
+
+# Tutorial recordings: raw .apng drivers drop are intermediate; ffmpeg-converted
+# .mp4s under doc/source/_static/tutorials/ are tracked.
+doc/source/_static/tutorials/*.apng
+
+# Runtime artifacts dropped next to features / at repo root.
+imgui.ini
+libhv.*.log
+screenshot.png
