@@ -61,9 +61,8 @@ var g_spawn : int = 0                                  // cascade offset for new
 var g_seeded : table<int>                              // node ids whose initial position has been pushed to the editor
 var g_dbg_canvas   : float2
 var g_dbg_zoom     : float
-var g_dbg_s_origin : float2
-var g_dbg_s_far    : float2
-var g_request_navigate : bool = false
+var g_request_navigate : bool = false                  // fit-to-content requested (startup + navigate_to_content live command)
+var g_did_startup_fit : bool = false                   // one-shot guard: fit the initial graph once it has laid out
 var g_ctx_node : int = 0                               // node under a right-click (node context menu)
 var g_ctx_link : int = 0                               // link under a right-click (link context menu)
 var g_ctx_pos  : float2                                // canvas pos to place a context-menu-created node
@@ -444,8 +443,6 @@ def draw_editor() {
     node_editor("shader_graph", (editor = g_ed, size = float2(0.0, 0.0))) {
         g_dbg_canvas = imgui_node_editor::GetScreenSize()
         g_dbg_zoom = imgui_node_editor::GetCurrentZoom()
-        g_dbg_s_origin = imgui_node_editor::CanvasToScreen(float2(0.0, 0.0))
-        g_dbg_s_far = imgui_node_editor::CanvasToScreen(float2(1000.0, 1000.0))
         // Groups draw first so regular nodes sit on top of them. A group is a pin-less
         // node (group() = BeginNode + Group(size)); its title labels the box.
         for (gr in values(g_graph.groups)) {
@@ -641,8 +638,14 @@ def draw_editor() {
             }
         }
 
-        // NavigateToContent auto-call is DISABLED (DPI-broken under SCALE_TO_MONITOR,
-        // see STATE.md). The `navigate_to_content` live command flips g_request_navigate.
+        // Fit-on-startup: once the initial graph has laid out (node bounds are valid only
+        // after a node's first render — see the seeding note above), fit it to the view.
+        // Also serviced by the navigate_to_content live command. NavigateToContent must run
+        // with the editor current — here, inside the node_editor block.
+        if (!g_did_startup_fit && !empty(g_seeded)) {
+            g_request_navigate = true
+            g_did_startup_fit = true
+        }
         if (g_request_navigate) {
             imgui_node_editor::NavigateToContent(0.0)
             g_request_navigate = false
@@ -789,7 +792,7 @@ def shutdown() {
     harness_shutdown()
 }
 
-[live_command(description = "Trigger NavigateToContent on the editor (to observe the DPI bug)")]
+[live_command(description = "Fit the view to all content (NavigateToContent), applied next frame inside the editor block.")]
 def navigate_to_content(input : JsonValue?) : JsonValue? {
     g_request_navigate = true
     return JV("queued")
@@ -826,7 +829,7 @@ def spawn_node_cmd(input : JsonValue?) : JsonValue? {
     return JV((id = nid))
 }
 
-[live_command(description = "Editor display + framebuffer dimensions for debugging coverage")]
+[live_command(description = "Editor view + framebuffer dims. `zoom` is GetCurrentZoom = InvScale (1/scale): a zoomed-out view reads > 1, a zoomed-in view < 1.")]
 def editor_dims(input : JsonValue?) : JsonValue? {
     let io & = unsafe(GetIO())
     return JV((
@@ -836,11 +839,7 @@ def editor_dims(input : JsonValue?) : JsonValue? {
         fb_scale_y = io.DisplayFramebufferScale.y,
         canvas_w = g_dbg_canvas.x,
         canvas_h = g_dbg_canvas.y,
-        zoom = g_dbg_zoom,
-        s_origin_x = g_dbg_s_origin.x,
-        s_origin_y = g_dbg_s_origin.y,
-        s_far_x = g_dbg_s_far.x,
-        s_far_y = g_dbg_s_far.y
+        zoom = g_dbg_zoom
     ))
 }
 
