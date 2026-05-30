@@ -62,7 +62,6 @@ def draw_editor() {
 [export]
 def update() {
     if (!harness_begin_frame()) return
-    harness_apply_synth_io()   // drain the recording driver's move_to / cursor synth
     harness_new_frame()
     let io & = unsafe(GetIO())
     SetNextWindowPos(float2(0.0, 0.0), ImGuiCond.Always)
