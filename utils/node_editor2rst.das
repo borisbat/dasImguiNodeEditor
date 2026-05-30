@@ -65,10 +65,10 @@ def document_module_imgui_node_editor_theme_daslang() {
 def document_module_imgui_node_editor_app() {
     var mod = find_module("imgui_node_editor_app")
     var groups <- array<DocGroup>(
-        group_by_regex("App harness", mod, %regex~^with_node_editor_app$%%),
+        group_by_regex("App harness", mod, %regex~^with_node_editor(_recording)?_app$%%),
         hide_group(group_by_regex("Internal", mod, %regex~^(_|priv_).*%%))
     )
-    document("App harness — with_node_editor_app, a thin node-editor delegate over imgui_playwright's with_imgui_app", mod, "imgui_node_editor_app.rst", groups)
+    document("App harness — with_node_editor_app + with_node_editor_recording_app, thin node-editor delegates over imgui_playwright's with_imgui_app / with_recording_app", mod, "imgui_node_editor_app.rst", groups)
 }
 
 
