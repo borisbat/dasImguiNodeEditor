@@ -11,10 +11,10 @@ require imgui/imgui_editor_playwright public      // ne_* + re-exported imgui_pl
 //!
 //! Synthesizes a right-click on empty canvas via imgui_mouse_play and asserts the Create-Node
 //! menu opens — its items (BG_CTX/CREATE_*) are absent until opened, so their appearance proves
-//! the whole chain end-to-end: the example's harness_apply_synth_io() drains the synth timeline,
-//! the Suspend/Resume + show_background_context_menu wrappers fire, and the popup + menu_labels
-//! render. (A regression guard for the synth-IO-drain bug — without harness_apply_synth_io the
-//! right-click never lands and the menu never opens.)
+//! the whole chain end-to-end: harness_new_frame's synth tick drains the timeline, the
+//! Suspend/Resume + show_background_context_menu wrappers fire, and the popup + menu_labels
+//! render. (A regression guard for the synth-IO path — if the right-click never lands the
+//! menu never opens.)
 
 let SHADER_GRAPH = "modules/dasImguiNodeEditor/examples/node-editor/shader_graph.das"
 

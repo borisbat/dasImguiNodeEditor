@@ -769,7 +769,6 @@ def init() {
 [export]
 def update() {
     if (!harness_begin_frame()) return
-    harness_apply_synth_io()    // drain synth mouse/key timelines (imgui_mouse_play etc.) + re-assert synth cursor over the real mouse
     harness_new_frame()
     // Fullscreen borderless host window (the imgui-node-editor framework pattern).
     let io & = unsafe(GetIO())
@@ -793,7 +792,7 @@ def shutdown() {
 }
 
 [live_command(description = "Fit the view to all content (NavigateToContent), applied next frame inside the editor block.")]
-def navigate_to_content(input : JsonValue?) : JsonValue? {
+def navigate_to_content(_input : JsonValue?) : JsonValue? {
     g_request_navigate = true
     return JV("queued")
 }
@@ -830,7 +829,7 @@ def spawn_node_cmd(input : JsonValue?) : JsonValue? {
 }
 
 [live_command(description = "Editor view + framebuffer dims. `zoom` is GetCurrentZoom = InvScale (1/scale): a zoomed-out view reads > 1, a zoomed-in view < 1.")]
-def editor_dims(input : JsonValue?) : JsonValue? {
+def editor_dims(_input : JsonValue?) : JsonValue? {
     let io & = unsafe(GetIO())
     return JV((
         display_w = io.DisplaySize.x,

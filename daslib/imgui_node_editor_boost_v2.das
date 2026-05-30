@@ -286,7 +286,7 @@ def private finalize_entity_leaf(widget_ident : string; kind : string; var entry
 // selection and link topology, so nothing is stored per frame. Each brackets
 // SetCurrentEditor since the context isn't current outside the node_editor block
 // (same pattern as set_node_position).
-def private node_editor_payload(ctx : void?; id : int) : JsonValue? {
+def private node_editor_payload(ctx : void?; _id : int) : JsonValue? {
     // The canvas exposes the app-owned editor handle (= intptr(editor)) the live API
     // targets, plus the last context-menu target (recorded by show_*_context_menu) so
     // it's observable across frames. No editor query needed — both are module state.
@@ -335,7 +335,7 @@ def private node_payload(ctx : void?; id : int) : JsonValue? {
                selected = sel, z = z))
 }
 
-def private pin_payload(ctx : void?; id : int) : JsonValue? {
+def private pin_payload(_ctx : void?; id : int) : JsonValue? {
     // No editor-queryable pin detail (no GetPinKind), so the payload is just the id.
     return JV((id = id))
 }
@@ -1007,7 +1007,17 @@ def with_suspended(blk : block) {
     //! Bracket Suspend()/Resume() around the body. Context-menu detection and the
     //! popups it opens must run here (screen space), not under the canvas transform.
     imgui_node_editor::Suspend()
-    invoke(blk)
+    // Suspend() restores ImGui's screen coordinate frame, so widgets drawn here (the
+    // context-menu popups) already report screen-space item rects. Push an identity
+    // snapshot item-transform so capture_item_bbox records them verbatim instead of
+    // re-mapping through the enclosing canvas transform — otherwise their `bbox` is
+    // the double-mapped (wrong) rect and a real synthetic click warps off the target.
+    push_snapshot_item_transform(float2(1.0, 1.0), float2(0.0, 0.0))
+    {
+        invoke(blk)
+    } finally {
+        pop_snapshot_item_transform()
+    }
     imgui_node_editor::Resume()
 }
 
