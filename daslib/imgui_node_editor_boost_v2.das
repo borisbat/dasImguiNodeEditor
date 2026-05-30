@@ -129,7 +129,16 @@ def node_editor(editor : imgui_node_editor::EditorContext?; size : float2 = floa
     imgui_node_editor::SetCurrentEditor(editor)
     g_active_editor = unsafe(reinterpret<void?>(editor))
     imgui_node_editor::Begin(widget_ident, size)
+    // Tell the snapshot capture how to map this canvas's local item rects to screen,
+    // so interior widgets (node titles, pin labels, drawlist art) report screen-space
+    // `bbox` + a `canvas_bbox`. The canvas remaps ImGui to local space between Begin/End,
+    // so GetItemRectMin (which widget_finalize captures) is canvas-local in here.
+    let xo  = imgui_node_editor::CanvasToScreen(float2(0.0, 0.0))
+    let xux = imgui_node_editor::CanvasToScreen(float2(1.0, 0.0))
+    let xuy = imgui_node_editor::CanvasToScreen(float2(0.0, 1.0))
+    set_snapshot_item_transform(float2(xux.x - xo.x, xuy.y - xo.y), xo)
     invoke(blk)
+    clear_snapshot_item_transform()
     imgui_node_editor::End()
     g_active_editor = null
     imgui_node_editor::SetCurrentEditor(null)
@@ -307,8 +316,15 @@ def private node_payload(ctx : void?; id : int) : JsonValue? {
     let sz = imgui_node_editor::GetNodeSize(id)
     let sel = imgui_node_editor::IsNodeSelected(id)
     let z = imgui_node_editor::GetNodeZPosition(id)
+    // Map the editor-owned canvas geometry to screen (the snapshot is uniformly
+    // screen-space); keep the canvas rect alongside as canvas_bbox.
+    let smin = imgui_node_editor::CanvasToScreen(pos)
+    let smax = imgui_node_editor::CanvasToScreen(pos + sz)
     imgui_node_editor::SetCurrentEditor(null)
-    return JV((id = id, bbox = float4(pos.x, pos.y, pos.x + sz.x, pos.y + sz.y), selected = sel, z = z))
+    return JV((id = id,
+               bbox = float4(smin.x, smin.y, smax.x, smax.y),
+               canvas_bbox = float4(pos.x, pos.y, pos.x + sz.x, pos.y + sz.y),
+               selected = sel, z = z))
 }
 
 def private pin_payload(ctx : void?; id : int) : JsonValue? {
@@ -350,7 +366,10 @@ def node(id : NodeId; color : float4 = float4(-1.0, -1.0, -1.0, -1.0); blk : blo
     var entry : WidgetEntry
     let pos = imgui_node_editor::GetNodePosition(id)
     let sz = imgui_node_editor::GetNodeSize(id)
-    entry.bbox = float4(pos.x, pos.y, pos.x + sz.x, pos.y + sz.y)
+    let smin = imgui_node_editor::CanvasToScreen(pos)
+    let smax = imgui_node_editor::CanvasToScreen(pos + sz)
+    entry.bbox = float4(smin.x, smin.y, smax.x, smax.y)
+    entry.canvas_bbox = float4(pos.x, pos.y, pos.x + sz.x, pos.y + sz.y)
     entry.serialize_id = id
     entry.serialize_ctx = g_active_editor
     entry.serialize = @@node_payload
@@ -375,7 +394,10 @@ def node_group(id : NodeId; size : float2 = float2(200.0, 150.0); blk : block) {
     var entry : WidgetEntry
     let pos = imgui_node_editor::GetNodePosition(id)
     let sz = imgui_node_editor::GetNodeSize(id)
-    entry.bbox = float4(pos.x, pos.y, pos.x + sz.x, pos.y + sz.y)
+    let smin = imgui_node_editor::CanvasToScreen(pos)
+    let smax = imgui_node_editor::CanvasToScreen(pos + sz)
+    entry.bbox = float4(smin.x, smin.y, smax.x, smax.y)
+    entry.canvas_bbox = float4(pos.x, pos.y, pos.x + sz.x, pos.y + sz.y)
     entry.serialize_id = id
     entry.serialize_ctx = g_active_editor
     entry.serialize = @@node_payload
@@ -407,6 +429,15 @@ def pin(id : PinId; kind : PinKind;
     invoke(blk)
     imgui_node_editor::EndPin()
     var entry : WidgetEntry
+    // imgui-node-editor exposes no pin-geometry query, but the pin's content was just
+    // laid out — its item rect (canvas-local inside the canvas) maps to a screen-space
+    // pin bbox. This is the only pin geometry callers get (drag targeting, hit tests).
+    let rmin = GetItemRectMin()
+    let rmax = GetItemRectMax()
+    let smin = imgui_node_editor::CanvasToScreen(rmin)
+    let smax = imgui_node_editor::CanvasToScreen(rmax)
+    entry.bbox = float4(smin.x, smin.y, smax.x, smax.y)
+    entry.canvas_bbox = float4(rmin.x, rmin.y, rmax.x, rmax.y)
     entry.serialize_id = id
     entry.serialize = @@pin_payload
     finalize_entity(widget_ident, "pin", entry)
