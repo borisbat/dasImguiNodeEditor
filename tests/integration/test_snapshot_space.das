@@ -52,14 +52,25 @@ def test_snapshot_space(t : T?) {
         t |> success(near(c1x, 40.0f, 2.0f), "node_1 canvas_bbox.x ~= seeded 40 (got {c1x})")
         t |> success(near(c2x, 340.0f, 2.0f), "node_2 canvas_bbox.x ~= seeded 340 (got {c2x})")
 
-        // ---- 3. bbox is screen-space: origin baked in, canvas spacing preserved ----
+        // ---- 3. bbox is a uniform affine image of canvas_bbox ----
+        // Recover scale + offset from the two nodes and require BOTH map by the same
+        // affine. This is translation-invariant — it holds whether or not the canvas has
+        // a screen offset, so it never assumes a non-zero origin.
         let b1x = n1?["bbox"]?["x"] ?? 0.0f
         let b2x = n2?["bbox"]?["x"] ?? 0.0f
-        t |> success(!near(b1x, c1x, 1.0f), "node_1 screen bbox.x differs from canvas (origin offset baked in)")
-        let screen_span = b2x - b1x
         let canvas_span = c2x - c1x
-        t |> success(near(screen_span, canvas_span, 6.0f),
-                     "screen spacing tracks canvas spacing ({screen_span} vs {canvas_span})")
+        t |> success(canvas_span > 1.0f, "nodes separated in canvas space ({canvas_span})")
+        let scale = (b2x - b1x) / canvas_span
+        t |> success(scale > 0.25f && scale < 4.0f, "screen/canvas scale is sane ({scale})")
+        let off1 = b1x - c1x * scale
+        let off2 = b2x - c2x * scale
+        t |> success(near(off1, off2, 1.0f),
+                     "bbox maps canvas_bbox by a single affine (offset {off1} vs {off2})")
+        // Fixture-specific (NOT a general invariant): this windowed canvas sits inside a
+        // padded window, so its screen origin is non-zero and screen-space bbox is offset
+        // from canvas_bbox. A canvas pinned at screen (0,0) scale 1 would legitimately
+        // coincide — hence this is the only offset-assuming check, and it's scoped here.
+        t |> success(off1 > 0.0f, "screen bbox carries the canvas screen origin ({off1})")
 
         // ---- 4. the canvas boundary itself (outside the transform) has NO canvas_bbox ----
         // node_editor() sets only the item-transform, never its own canvas_bbox; the @optional

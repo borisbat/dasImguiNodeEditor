@@ -52,8 +52,10 @@ def test_clipboard(t : T?) {
         var snapP = wait_until_sec(d, 8.0f) $(var snap) {
             if (!widget_exists(snap, "{s.canvas}/link_20")) return false
             let other = widget_exists(snap, "{s.canvas}/node_16") ? 16 : 18
-            let bA = find_widget(snap, "{s.canvas}/node_14")?["payload"]?["bbox"]
-            let bB = find_widget(snap, "{s.canvas}/node_{other}")?["payload"]?["bbox"]
+            // canvas_bbox carries the editor canvas-space rect (GetNodePosition); payload.bbox
+            // is now screen-space, so the canvas-layout spacing check reads canvas_bbox.
+            let bA = find_widget(snap, "{s.canvas}/node_14")?["payload"]?["canvas_bbox"]
+            let bB = find_widget(snap, "{s.canvas}/node_{other}")?["payload"]?["canvas_bbox"]
             var dx = (bA?["x"] ?? 0.0) - (bB?["x"] ?? 0.0)
             var dy = (bA?["y"] ?? 0.0) - (bB?["y"] ?? 0.0)
             if (dx < 0.0) {

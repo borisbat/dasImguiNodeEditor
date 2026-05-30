@@ -139,8 +139,14 @@ def node_editor(editor : imgui_node_editor::EditorContext?; size : float2 = floa
     let xux = imgui_node_editor::CanvasToScreen(float2(1.0, 0.0))
     let xuy = imgui_node_editor::CanvasToScreen(float2(0.0, 1.0))
     push_snapshot_item_transform(float2(xux.x - xo.x, xuy.y - xo.y), xo)
-    invoke(blk)
-    pop_snapshot_item_transform()
+    // finally pops before End() on the normal and early-exit paths so the canvas
+    // boundary dummy isn't transformed; a panic skips it, but dasImgui's begin_frame
+    // resets the stack each frame, so the transform can't leak past this frame either way.
+    {
+        invoke(blk)
+    } finally {
+        pop_snapshot_item_transform()
+    }
     imgui_node_editor::End()
     g_active_editor = null
     imgui_node_editor::SetCurrentEditor(null)
@@ -350,11 +356,13 @@ def node(id : NodeId; color : float4 = float4(-1.0, -1.0, -1.0, -1.0); blk : blo
     //! A graph node — `node(id, (color = …)){…}`. `id` is the editor's node handle.
     //! `color` tints the node body via PushStyleColor(StyleColor.NodeBg); pass a
     //! negative color (e.g. float4(-1,-1,-1,-1)) to keep the editor default.
-    //! Registers as kind "node"; payload {id, bbox, selected} is built lazily at
-    //! snapshot (node_payload) by querying the editor — the editor owns node
-    //! geometry, not ImGui's item rect. entry.bbox is still set per frame for
-    //! click-targeting. Child pins/text nest under this node's path. `widget_ident`
-    //! is macro-injected (= "node_{id}").
+    //! Registers as kind "node"; payload {id, bbox, canvas_bbox, selected, z} is built
+    //! lazily at snapshot (node_payload) by querying the editor — the editor owns node
+    //! geometry, not ImGui's item rect. `bbox` is screen-space (for click-targeting /
+    //! visual aids, uniform with all other widgets); `canvas_bbox` carries the editor
+    //! canvas-space rect. entry.bbox/entry.canvas_bbox are also set per frame. Child
+    //! pins/text nest under this node's path. `widget_ident` is macro-injected
+    //! (= "node_{id}").
     let tinted = color.x >= 0.0
     if (tinted) {
         imgui_node_editor::PushStyleColor(StyleColor.NodeBg, color)
@@ -386,8 +394,9 @@ def node_group(id : NodeId; size : float2 = float2(200.0, 150.0); blk : block) {
     //! ONE-TIME seed (like node position) — once the node is a group the editor owns its
     //! bounds and ignores the passed size on later frames; use set_group_size to resize.
     //! Named node_group (not group) to avoid colliding with imgui's BeginGroup/EndGroup
-    //! `group` container. Registers as kind "node_group"; payload {id, bbox, selected, z}
-    //! is built lazily via node_payload (a group is geometrically a node). `widget_ident`
+    //! `group` container. Registers as kind "node_group"; payload {id, bbox, canvas_bbox,
+    //! selected, z} is built lazily via node_payload (a group is geometrically a node) —
+    //! `bbox` screen-space, `canvas_bbox` the editor canvas-space rect. `widget_ident`
     //! is macro-injected (= "node_group_{id}").
     imgui_node_editor::BeginNode(id)
     invoke(blk)
