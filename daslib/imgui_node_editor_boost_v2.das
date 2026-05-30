@@ -133,12 +133,14 @@ def node_editor(editor : imgui_node_editor::EditorContext?; size : float2 = floa
     // so interior widgets (node titles, pin labels, drawlist art) report screen-space
     // `bbox` + a `canvas_bbox`. The canvas remaps ImGui to local space between Begin/End,
     // so GetItemRectMin (which widget_finalize captures) is canvas-local in here.
+    // CanvasToScreen is the absolute local→screen affine, so this push/pop nests if one
+    // node_editor is ever drawn inside another.
     let xo  = imgui_node_editor::CanvasToScreen(float2(0.0, 0.0))
     let xux = imgui_node_editor::CanvasToScreen(float2(1.0, 0.0))
     let xuy = imgui_node_editor::CanvasToScreen(float2(0.0, 1.0))
-    set_snapshot_item_transform(float2(xux.x - xo.x, xuy.y - xo.y), xo)
+    push_snapshot_item_transform(float2(xux.x - xo.x, xuy.y - xo.y), xo)
     invoke(blk)
-    clear_snapshot_item_transform()
+    pop_snapshot_item_transform()
     imgui_node_editor::End()
     g_active_editor = null
     imgui_node_editor::SetCurrentEditor(null)
