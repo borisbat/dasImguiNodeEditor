@@ -30,3 +30,31 @@ def public with_node_editor_app(feature_path : string;
     let root = ne_module_root()
     with_imgui_app(feature_path, [root], root, "modules/dasImguiNodeEditor/", body)
 }
+
+def public with_node_editor_recording_app(feature_path : string;
+                                          output_apng_basename : string;
+                                          max_seconds : int;
+                                          body : block<(app : ImguiApp) : void>) {
+    //! Native-fps recording session against a node-editor tutorial feature (the
+    //! common case). Delegates to the fps overload — gen2's trailing-block sugar
+    //! can't see through a default parameter between the last positional and the
+    //! block, so the overload pair keeps call sites clean.
+    with_node_editor_recording_app(feature_path, output_apng_basename, max_seconds, RECORD_FPS, body)
+}
+
+def public with_node_editor_recording_app(feature_path : string;
+                                          output_apng_basename : string;
+                                          max_seconds : int;
+                                          fps : int;
+                                          body : block<(app : ImguiApp) : void>) {
+    //! Record an `.apng` of a node-editor feature with BOTH dasImgui and
+    //! dasImguiNodeEditor loaded — the recording counterpart of
+    //! `with_node_editor_app`. Threads the node-editor module as an extra
+    //! `-load_module`, resolves a relative `feature_path` under the node-editor
+    //! root, and roots the `.apng` asset dir there too. All record lifecycle
+    //! (visual aids, record_start/stop, attach-vs-spawn) lives once in dasImgui's
+    //! `with_recording_app`.
+    let root = ne_module_root()
+    with_recording_app(feature_path, output_apng_basename, max_seconds, fps,
+                       [root], root, root, body)
+}
