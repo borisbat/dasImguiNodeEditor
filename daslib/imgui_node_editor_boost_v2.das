@@ -129,7 +129,24 @@ def node_editor(editor : imgui_node_editor::EditorContext?; size : float2 = floa
     imgui_node_editor::SetCurrentEditor(editor)
     g_active_editor = unsafe(reinterpret<void?>(editor))
     imgui_node_editor::Begin(widget_ident, size)
-    invoke(blk)
+    // Tell the snapshot capture how to map this canvas's local item rects to screen,
+    // so interior widgets (node titles, pin labels, drawlist art) report screen-space
+    // `bbox` + a `canvas_bbox`. The canvas remaps ImGui to local space between Begin/End,
+    // so GetItemRectMin (which widget_finalize captures) is canvas-local in here.
+    // CanvasToScreen is the absolute local→screen affine, so this push/pop nests if one
+    // node_editor is ever drawn inside another.
+    let xo  = imgui_node_editor::CanvasToScreen(float2(0.0, 0.0))
+    let xux = imgui_node_editor::CanvasToScreen(float2(1.0, 0.0))
+    let xuy = imgui_node_editor::CanvasToScreen(float2(0.0, 1.0))
+    push_snapshot_item_transform(float2(xux.x - xo.x, xuy.y - xo.y), xo)
+    // finally pops before End() on the normal and early-exit paths so the canvas
+    // boundary dummy isn't transformed; a panic skips it, but dasImgui's begin_frame
+    // resets the stack each frame, so the transform can't leak past this frame either way.
+    {
+        invoke(blk)
+    } finally {
+        pop_snapshot_item_transform()
+    }
     imgui_node_editor::End()
     g_active_editor = null
     imgui_node_editor::SetCurrentEditor(null)
@@ -307,8 +324,15 @@ def private node_payload(ctx : void?; id : int) : JsonValue? {
     let sz = imgui_node_editor::GetNodeSize(id)
     let sel = imgui_node_editor::IsNodeSelected(id)
     let z = imgui_node_editor::GetNodeZPosition(id)
+    // Map the editor-owned canvas geometry to screen (the snapshot is uniformly
+    // screen-space); keep the canvas rect alongside as canvas_bbox.
+    let smin = imgui_node_editor::CanvasToScreen(pos)
+    let smax = imgui_node_editor::CanvasToScreen(pos + sz)
     imgui_node_editor::SetCurrentEditor(null)
-    return JV((id = id, bbox = float4(pos.x, pos.y, pos.x + sz.x, pos.y + sz.y), selected = sel, z = z))
+    return JV((id = id,
+               bbox = float4(smin.x, smin.y, smax.x, smax.y),
+               canvas_bbox = float4(pos.x, pos.y, pos.x + sz.x, pos.y + sz.y),
+               selected = sel, z = z))
 }
 
 def private pin_payload(ctx : void?; id : int) : JsonValue? {
@@ -332,11 +356,13 @@ def node(id : NodeId; color : float4 = float4(-1.0, -1.0, -1.0, -1.0); blk : blo
     //! A graph node — `node(id, (color = …)){…}`. `id` is the editor's node handle.
     //! `color` tints the node body via PushStyleColor(StyleColor.NodeBg); pass a
     //! negative color (e.g. float4(-1,-1,-1,-1)) to keep the editor default.
-    //! Registers as kind "node"; payload {id, bbox, selected} is built lazily at
-    //! snapshot (node_payload) by querying the editor — the editor owns node
-    //! geometry, not ImGui's item rect. entry.bbox is still set per frame for
-    //! click-targeting. Child pins/text nest under this node's path. `widget_ident`
-    //! is macro-injected (= "node_{id}").
+    //! Registers as kind "node"; payload {id, bbox, canvas_bbox, selected, z} is built
+    //! lazily at snapshot (node_payload) by querying the editor — the editor owns node
+    //! geometry, not ImGui's item rect. `bbox` is screen-space (for click-targeting /
+    //! visual aids, uniform with all other widgets); `canvas_bbox` carries the editor
+    //! canvas-space rect. entry.bbox/entry.canvas_bbox are also set per frame. Child
+    //! pins/text nest under this node's path. `widget_ident` is macro-injected
+    //! (= "node_{id}").
     let tinted = color.x >= 0.0
     if (tinted) {
         imgui_node_editor::PushStyleColor(StyleColor.NodeBg, color)
@@ -350,7 +376,10 @@ def node(id : NodeId; color : float4 = float4(-1.0, -1.0, -1.0, -1.0); blk : blo
     var entry : WidgetEntry
     let pos = imgui_node_editor::GetNodePosition(id)
     let sz = imgui_node_editor::GetNodeSize(id)
-    entry.bbox = float4(pos.x, pos.y, pos.x + sz.x, pos.y + sz.y)
+    let smin = imgui_node_editor::CanvasToScreen(pos)
+    let smax = imgui_node_editor::CanvasToScreen(pos + sz)
+    entry.bbox = float4(smin.x, smin.y, smax.x, smax.y)
+    entry.canvas_bbox = float4(pos.x, pos.y, pos.x + sz.x, pos.y + sz.y)
     entry.serialize_id = id
     entry.serialize_ctx = g_active_editor
     entry.serialize = @@node_payload
@@ -365,8 +394,9 @@ def node_group(id : NodeId; size : float2 = float2(200.0, 150.0); blk : block) {
     //! ONE-TIME seed (like node position) — once the node is a group the editor owns its
     //! bounds and ignores the passed size on later frames; use set_group_size to resize.
     //! Named node_group (not group) to avoid colliding with imgui's BeginGroup/EndGroup
-    //! `group` container. Registers as kind "node_group"; payload {id, bbox, selected, z}
-    //! is built lazily via node_payload (a group is geometrically a node). `widget_ident`
+    //! `group` container. Registers as kind "node_group"; payload {id, bbox, canvas_bbox,
+    //! selected, z} is built lazily via node_payload (a group is geometrically a node) —
+    //! `bbox` screen-space, `canvas_bbox` the editor canvas-space rect. `widget_ident`
     //! is macro-injected (= "node_group_{id}").
     imgui_node_editor::BeginNode(id)
     invoke(blk)
@@ -375,7 +405,10 @@ def node_group(id : NodeId; size : float2 = float2(200.0, 150.0); blk : block) {
     var entry : WidgetEntry
     let pos = imgui_node_editor::GetNodePosition(id)
     let sz = imgui_node_editor::GetNodeSize(id)
-    entry.bbox = float4(pos.x, pos.y, pos.x + sz.x, pos.y + sz.y)
+    let smin = imgui_node_editor::CanvasToScreen(pos)
+    let smax = imgui_node_editor::CanvasToScreen(pos + sz)
+    entry.bbox = float4(smin.x, smin.y, smax.x, smax.y)
+    entry.canvas_bbox = float4(pos.x, pos.y, pos.x + sz.x, pos.y + sz.y)
     entry.serialize_id = id
     entry.serialize_ctx = g_active_editor
     entry.serialize = @@node_payload
@@ -407,6 +440,15 @@ def pin(id : PinId; kind : PinKind;
     invoke(blk)
     imgui_node_editor::EndPin()
     var entry : WidgetEntry
+    // imgui-node-editor exposes no pin-geometry query, but the pin's content was just
+    // laid out — its item rect (canvas-local inside the canvas) maps to a screen-space
+    // pin bbox. This is the only pin geometry callers get (drag targeting, hit tests).
+    let rmin = GetItemRectMin()
+    let rmax = GetItemRectMax()
+    let smin = imgui_node_editor::CanvasToScreen(rmin)
+    let smax = imgui_node_editor::CanvasToScreen(rmax)
+    entry.bbox = float4(smin.x, smin.y, smax.x, smax.y)
+    entry.canvas_bbox = float4(rmin.x, rmin.y, rmax.x, rmax.y)
     entry.serialize_id = id
     entry.serialize = @@pin_payload
     finalize_entity(widget_ident, "pin", entry)
