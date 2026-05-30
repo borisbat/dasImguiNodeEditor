@@ -16,3 +16,5 @@ below).
 
    first_graph.rst
    connect_by_drag.rst
+   delete_and_select.rst
+   context_menus.rst
