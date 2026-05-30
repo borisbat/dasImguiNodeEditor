@@ -47,15 +47,16 @@ def test_connect_drag(t : T?) {
         // drag to the input pin over ~900ms with the button held, then park on the input
         // pin through the release. imgui_mouse_play drains over wall-clock; the subject
         // applies synth IO each frame.
-        var events : array<JsonValue?>
-        events |> push(JV((t_ms = 0,    kind = "move",   x = out_c._0, y = out_c._1)))
-        events |> push(JV((t_ms = 350,  kind = "move",   x = out_c._0, y = out_c._1)))
-        events |> push(JV((t_ms = 400,  kind = "button", button = 0,   action = "press")))
-        events |> push(JV((t_ms = 500,  kind = "move",   x = out_c._0, y = out_c._1)))
-        events |> push(JV((t_ms = 1400, kind = "move",   x = in_c._0,  y = in_c._1)))
-        events |> push(JV((t_ms = 1550, kind = "move",   x = in_c._0,  y = in_c._1)))
-        events |> push(JV((t_ms = 1650, kind = "button", button = 0,   action = "release")))
-        events |> push(JV((t_ms = 1800, kind = "move",   x = in_c._0,  y = in_c._1)))
+        var events <- [
+            JV((t_ms = 0,    kind = "move",   x = out_c._0, y = out_c._1)),
+            JV((t_ms = 350,  kind = "move",   x = out_c._0, y = out_c._1)),
+            JV((t_ms = 400,  kind = "button", button = 0,   action = "press")),
+            JV((t_ms = 500,  kind = "move",   x = out_c._0, y = out_c._1)),
+            JV((t_ms = 1400, kind = "move",   x = in_c._0,  y = in_c._1)),
+            JV((t_ms = 1550, kind = "move",   x = in_c._0,  y = in_c._1)),
+            JV((t_ms = 1650, kind = "button", button = 0,   action = "release")),
+            JV((t_ms = 1800, kind = "move",   x = in_c._0,  y = in_c._1))
+        ]
         post_command(d, "imgui_mouse_play", JV((events = events)))
 
         // The link should commit once the drag releases over the input pin.
