@@ -21,7 +21,7 @@ require imgui/imgui_node_editor_live
 // graph is static — see connect_by_drag for making links with the mouse.
 //
 // STANDALONE: daslang.exe modules/dasImguiNodeEditor/examples/tutorial/first_graph.das
-// LIVE:       daslang-live modules/dasImgui/examples/tutorial/first_graph.das
+// LIVE:       daslang-live modules/dasImguiNodeEditor/examples/tutorial/first_graph.das
 // =============================================================================
 
 var g_ed : imgui_node_editor::EditorContext? = null

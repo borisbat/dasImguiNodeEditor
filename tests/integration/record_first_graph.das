@@ -47,7 +47,7 @@ def main {
 
         move_to(app, c_pin21, 900)
         wait_for_mouse_idle(app)
-        say(app, "node(2) carries pin(21, PinKind.Input) - the sink on the left.", "{CANVAS}/node_2/pin_21")
+        say(app, "node(2) carries pin(21, PinKind.Input) - the destination a link feeds into.", "{CANVAS}/node_2/pin_21")
 
         move_to(app, c_link, 800)
         wait_for_mouse_idle(app)
