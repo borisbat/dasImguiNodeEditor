@@ -33,9 +33,10 @@ hit-test *and* the popup windows live inside a ``Suspend``/``Resume`` island —
        }
    }
 
-The background menu creates a node where you clicked; the node menu deletes its node
-through the **same** ``enqueue_delete_node`` / ``begin_delete`` rail as the
-:ref:`delete tutorial <tutorial_ne_delete_and_select>`.
+The background menu creates a node where you clicked; the node menu enqueues a delete
+(``enqueue_delete_node``). That and the :ref:`delete tutorial
+<tutorial_ne_delete_and_select>`'s native Delete key flow through the **same**
+``begin_delete`` accept loop.
 
 Source: ``examples/tutorial/context_menus.das``.
 

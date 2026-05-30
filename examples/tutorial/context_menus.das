@@ -17,8 +17,9 @@ require imgui/imgui_node_editor_live
 //
 // The editor draws in canvas space; popups are plain ImGui in SCREEN space, so the
 // detection + the popup windows live inside a Suspend/Resume island (with_suspended).
-// The background menu creates a node at the click point; the node menu deletes it
-// (through the same enqueue_delete_node / begin_delete rail as the delete tutorial).
+// The background menu creates a node at the click point; the node menu enqueues a
+// delete (enqueue_delete_node) that drains through the same begin_delete accept loop
+// the delete tutorial uses — there fed by the native Delete key.
 // =============================================================================
 
 struct Nd {

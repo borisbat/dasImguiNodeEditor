@@ -37,7 +37,7 @@ def test_delete_and_select(t : T?) {
         var ev : array<JsonValue?>
         ev |> click_at(0, (title_x, title_y), 200, 0)
         post_command(d, "imgui_mouse_play", JV((events = ev)))
-        let selected = wait_until(d, 360) $(var sn) {
+        let selected = wait_until_sec(d, 6.0f) $(var sn) {
             return find_widget(sn, "{canvas}/node_2")?["payload"]?["selected"] ?? false
         }
         t |> success(selected != null, "node_2 selected via real synthetic click")
@@ -46,7 +46,7 @@ def test_delete_and_select(t : T?) {
         let del = int(ImGuiKey.Delete)
         post_command(d, "imgui_key_press",   JV((key = del)))
         post_command(d, "imgui_key_release", JV((key = del)))
-        var gone = wait_until(d, 360) $(var sn) {
+        var gone = wait_until_sec(d, 6.0f) $(var sn) {
             return !widget_exists(sn, "{canvas}/node_2")
         }
         t |> success(gone != null, "node_2 deleted via real Delete key")

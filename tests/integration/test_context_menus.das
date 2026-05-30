@@ -51,7 +51,7 @@ def test_context_menus(t : T?) {
         var menuSnap = ne_wait_widget(s, "NODE_MENU/DEL_ITEM", 6.0f)
         t |> success(menuSnap != null, "right-click on node opened its context menu")
         click(d, del_item)
-        var gone = wait_until(d, 360) $(var sn) {
+        var gone = wait_until_sec(d, 6.0f) $(var sn) {
             return !widget_exists(sn, "{canvas}/node_1")
         }
         t |> success(gone != null, "'Delete node' removed node_1 (real click on canvas popup)")
