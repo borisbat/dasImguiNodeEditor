@@ -42,4 +42,5 @@ Then run ``daspkg install``.
    :maxdepth: 2
    :caption: Contents
 
+   tutorials/index
    stdlib/index
