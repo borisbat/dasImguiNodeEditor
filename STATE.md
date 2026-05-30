@@ -395,32 +395,29 @@ a loop — every `text()` title leaf serializes `"Texture"`, every input pin `"-
    `float4(1,1,1,1), 1.0`. The v2 boost wrappers should default these when we extract
    `link()` / `on_create()`.
 
-## Known bugs / deferred
+## Resolved
 
-- **`NavigateToContent` is DPI-broken.** Under the harness's `GLFW_SCALE_TO_MONITOR` (HiDPI),
-  `NavigateToContent(0.0)` computes a view scaled by the monitor content scale (~1.658×) plus
-  an off-screen pan, so the canvas only paints its top-left ~1/scale region. Confirmed via
-  `editor_dims`: `CanvasToScreen` scale 1.658 = 1/`GetCurrentZoom`(0.603); with navigate
-  disabled the view is a clean scale 1.0 at origin (8,8) and the grid fills the window. It is
-  **not** HDPI-framebuffer, not glViewport, not the harness `--imgui-content-scale`, not the
-  json. The v1 example dodged it by hand-rolling glfw without `SCALE_TO_MONITOR`.
-  **Currently disabled in the example.** TODO: fix navigate's DPI handling (likely
-  node-editor-side), then re-enable fit-on-startup.
-  - **One-shot repro:** the `navigate_to_content` live command flips `g_request_navigate`,
-    so the draw loop calls `NavigateToContent(0.0)` on a fully-settled editor. Observed:
-    view goes from clean (zoom 1.0, scale 1.0) → **zoom 0.603 / scale 1.658 in a single
-    call** (no frame-timing involved). Sharp clue: 0.603 = **1/1.658 exactly** = 1/(monitor
-    content scale) — not a fit-to-content number. So navigate applies the content scale
-    inversely once (logical-vs-physical canvas-size mismatch in `NavigateTo`/the
-    `NavigateAnimation` target view-rect), rather than mis-fitting the graph. Fix lives in
-    `imgui_node_editor.cpp` (`NavigateAction::NavigateTo` / canvas `ViewRect`/`CalcViewRect`
-    / `GetContentBounds`).
+- **`NavigateToContent` was NOT broken — misdiagnosis corrected 2026-05-29.** The earlier
+  "DPI-broken" entry read `editor_dims.zoom` as the view *scale* and saw `0.603` under the
+  harness's HiDPI (`GLFW_SCALE_TO_MONITOR`, monitor content scale 1.658). But `GetCurrentZoom()`
+  returns `GetView().InvScale` ([`imgui_node_editor_api.cpp:665`]) — so `0.603` means the real
+  `View.Scale = 1.658`, exactly what `CanvasToScreen` reports and what the framebuffer renders
+  (the graph is correctly framed; verified by screenshot). The `1.658` matching the monitor
+  content scale was a **coincidence**: the genuine fit scale for the 4-node sample graph is
+  `widget_w / (content_w × 1.1 margin) = 1264/762 = 1.658`. Proof it's a real content-fit and
+  not a scale leak: spawning a far node grew the content and the fit scale moved to `0.618`
+  (InvScale `1.618`) — it *tracks* the content. `test_render_config.das` already encoded the
+  correct interpretation (`editor_dims.zoom` is InvScale; zoomed-out reads ≥ 1.333).
+  **Fit-on-startup is re-enabled** in `shader_graph.das` (one-shot once the initial graph has
+  laid out), and `navigate_to_content` is a normal view-op live command. **No C++ change.**
 
-## Debug instrumentation (kept while iterating)
+## View-introspection (shader_graph debug commands)
 
 - `editor_dims` live command in `shader_graph.das` → DisplaySize, DisplayFramebufferScale,
-  canvas size (`GetScreenSize`), zoom, and `CanvasToScreen` of (0,0)/(1000,1000). Plus
-  `g_dbg_*` globals. Keep until the navigate DPI fix is done (wrapper extraction is complete).
+  canvas size (`GetScreenSize`), and `zoom` (= `GetCurrentZoom` = InvScale = 1/scale). Used by
+  `test_render_config.das` to confirm a zoom-out past the `group_hint` threshold. The
+  navigate-diagnosis-only `CanvasToScreen(0,0)/(1000,1000)` probes (`g_dbg_s_origin`/`s_far`)
+  were dropped once the misdiagnosis above was resolved.
 
 ## Wrapper roadmap — COMPLETE
 
