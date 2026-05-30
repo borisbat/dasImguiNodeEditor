@@ -34,32 +34,46 @@ def main {
         let out_c = widget_center(snap, "{CANVAS}/node_1/pin_11")
         let in_c  = widget_center(snap, "{CANVAS}/node_2/pin_21")
 
+        // Park the cursor on the output pin, then narrate. wait_for_mouse_idle polls
+        // imgui_mouse_status until the scripted move finishes (the cursor reaches its
+        // target) — event-driven, no blind sleep.
         move_to(app, out_c, 700)
-        sleep(SETTLE_MS)
+        wait_for_mouse_idle(app)
         say(app, "begin_create opens the create scope. Press on an output pin and start dragging...", "{CANVAS}/node_1/pin_11")
 
-        // The hero gesture, slow for the camera. Same recipe as test_connect_drag:
-        // park ON the output pin through the press, travel the full distance with the
-        // button held, park ON the input pin through the release. (drag_along presses
-        // ~10% into the travel — off-pin for a small target.)
+        // The hero gesture. Timing is VERBATIM from test_connect_drag (the proven
+        // committing sequence): park ON the output pin through the press, travel the
+        // full distance (~900ms) with the button held, park ON the input pin through
+        // the release. (drag_along presses ~10% into the travel — off-pin for a small
+        // target — so we hand-build the timeline.)
         var events <- [
             JV((t_ms = 0,    kind = "move",   x = out_c._0, y = out_c._1)),
+            JV((t_ms = 350,  kind = "move",   x = out_c._0, y = out_c._1)),
+            JV((t_ms = 400,  kind = "button", button = 0,   action = "press")),
             JV((t_ms = 500,  kind = "move",   x = out_c._0, y = out_c._1)),
-            JV((t_ms = 600,  kind = "button", button = 0,   action = "press")),
-            JV((t_ms = 800,  kind = "move",   x = out_c._0, y = out_c._1)),
-            JV((t_ms = 2200, kind = "move",   x = in_c._0,  y = in_c._1)),
-            JV((t_ms = 2450, kind = "move",   x = in_c._0,  y = in_c._1)),
-            JV((t_ms = 2600, kind = "button", button = 0,   action = "release")),
-            JV((t_ms = 2900, kind = "move",   x = in_c._0,  y = in_c._1))
+            JV((t_ms = 1400, kind = "move",   x = in_c._0,  y = in_c._1)),
+            JV((t_ms = 1550, kind = "move",   x = in_c._0,  y = in_c._1)),
+            JV((t_ms = 1650, kind = "button", button = 0,   action = "release")),
+            JV((t_ms = 1800, kind = "move",   x = in_c._0,  y = in_c._1))
         ]
         post_command(app, "imgui_mouse_play", JV((events = events)))
 
-        // Wait for the drag to land and the link to commit before narrating the result.
+        // Let the synth gesture FULLY drain (cursor arrives + button releases) before
+        // touching the snapshot API. wait_for_widget below snapshot-polls every frame;
+        // a snapshot landing mid-drag during an active recording (APNG capture already
+        // contends for each frame) disrupts the release — accept_new_item never fires
+        // and the link silently fails to commit. Waiting for mouse-idle first closes that
+        // window. (The non-recording test tolerates the concurrent polling — without
+        // frame-capture contention the loop keeps up — which is why it always passed and
+        // masked this.)
+        wait_for_mouse_idle(app)
+
+        // Now that the gesture is done, poll for the committed link and narrate the result.
         var snapL = wait_for_widget(app, "{CANVAS}/link_100", 10.0f)
         if (snapL != null) {
             say(app, "...release on a compatible input pin. query_new_link reports the pair; accept_new_item commits the link.", "{CANVAS}/link_100")
         } else {
-            say(app, "(the drag did not land — see test_connect_drag for the geometry)", "{CANVAS}/node_2/pin_21")
+            say(app, "(the drag did not land - see test_connect_drag for the geometry)", "{CANVAS}/node_2/pin_21")
         }
     }
 }

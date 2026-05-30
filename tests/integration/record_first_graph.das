@@ -34,23 +34,23 @@ def main {
         let c_link  = widget_center(snap, "{CANVAS}/link_100")
 
         move_to(app, c_node1, 600)
-        sleep(SETTLE_MS)
-        say(app, "node_editor — the canvas. create_node_editor() owns pan, zoom and selection; everything inside node_editor(...) is drawn in canvas space.", CANVAS)
+        wait_for_mouse_idle(app)
+        say(app, "node_editor - the canvas. create_node_editor() owns pan, zoom and selection; everything inside node_editor(...) is drawn in canvas space.", CANVAS)
 
         move_to(app, c_node1, 700)
-        sleep(SETTLE_MS)
-        say(app, "node(1) — a box. Its body is plain ImGui (here just a text label). Nodes are identified by an integer id you choose.", "{CANVAS}/node_1")
+        wait_for_mouse_idle(app)
+        say(app, "node(1) - a box. Its body is plain ImGui (here just a text label). Nodes are identified by an integer id you choose.", "{CANVAS}/node_1")
 
         move_to(app, c_pin11, 700)
-        sleep(SETTLE_MS)
-        say(app, "pin(11, PinKind.Output) — an output connection point on node 1.", "{CANVAS}/node_1/pin_11")
+        wait_for_mouse_idle(app)
+        say(app, "pin(11, PinKind.Output) - an output connection point on node 1.", "{CANVAS}/node_1/pin_11")
 
         move_to(app, c_pin21, 900)
-        sleep(SETTLE_MS)
-        say(app, "node(2) carries pin(21, PinKind.Input) — the sink on the left.", "{CANVAS}/node_2/pin_21")
+        wait_for_mouse_idle(app)
+        say(app, "node(2) carries pin(21, PinKind.Input) - the sink on the left.", "{CANVAS}/node_2/pin_21")
 
         move_to(app, c_link, 800)
-        sleep(SETTLE_MS)
-        say(app, "link(100, 11, 21) — one edge joining output pin 11 to input pin 21. The model is id-only: the editor tracks geometry, you own what the ids mean.", "{CANVAS}/link_100")
+        wait_for_mouse_idle(app)
+        say(app, "link(100, 11, 21) - one edge joining output pin 11 to input pin 21. The model is id-only: the editor tracks geometry, you own what the ids mean.", "{CANVAS}/link_100")
     }
 }
