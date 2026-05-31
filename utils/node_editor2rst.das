@@ -25,7 +25,7 @@ def document_module_imgui_node_editor_boost_v2() {
     // macros (no documentable render function survives expansion), so they auto-
     // list under "Call macros" and are explained in prose in the handmade intro.
     var groups <- array<DocGroup>(
-        group_by_regex("Editor lifecycle",      mod, %regex~^(create_node_editor|destroy_node_editor|handle_to_editor)$%%),
+        group_by_regex("Editor lifecycle",      mod, %regex~^(create_node_editor|destroy_node_editor|handle_to_editor|set_node_editor_id_tracking)$%%),
         group_by_regex("Node geometry & view",  mod, %regex~^(set_node_position|get_node_position|set_node_z_position|set_group_size|center_node_on_screen|navigate_to_selection|restore_node_state|get_ordered_node_ids)$%%),
         group_by_regex("Selection",             mod, %regex~^(get_selected_nodes|get_selected_links|select_node|select_link|clear_selection|get_action_context_nodes|get_action_context_links)$%%),
         group_by_regex("Link creation",         mod, %regex~^(begin_create|query_new_link|accept_new_item|reject_new_item|enqueue_new_link|clear_pending_links|show_new_node_drag|enqueue_new_node_drag)$%%),
