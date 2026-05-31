@@ -35,7 +35,7 @@ def main {
         }
         post_command(app, "set_user_control", JV((enabled = false)))
 
-        say(app, "node_group(id, size=...) is a pin-less node — a comment box that corrals what's on it.", "{CANVAS}/node_group_1")
+        say(app, "node_group(id, size=...) is a pin-less node - a comment box that corrals what's on it.", "{CANVAS}/node_group_1")
         wait_for_mouse_idle(app)
         say(app, "Two ordinary nodes seeded inside the box.", "{CANVAS}/node_10")
         wait_for_mouse_idle(app)
@@ -45,7 +45,7 @@ def main {
         let g_top = widget_center(snap, "{CANVAS}/node_group_1")
         let grab : tuple<float; float> = (g_top._0, g_top._1 - 120.0)   // up near the title bar
         let dest : tuple<float; float> = (grab._0 + 220.0, grab._1 + 60.0)
-        say(app, "Drag the group's title bar — the nodes on it come along.", "{CANVAS}/node_group_1")
+        say(app, "Drag the group's title bar - the nodes on it come along.", "{CANVAS}/node_group_1")
         var events <- [
             JV((t_ms = 0,    kind = "move",   x = grab._0, y = grab._1)),
             JV((t_ms = 300,  kind = "move",   x = grab._0, y = grab._1)),
