@@ -41,6 +41,15 @@ def test_styling(t : T?) {
 
         // The tinted source node and the link both render — the full styled graph is intact.
         t |> success(widget_exists(snap, "{s.canvas}/node_1"), "tinted source node renders (node_1)")
-        t |> success(ne_wait_widget(s, "link_100", 6.0f) != null, "link 12 -> 31 renders (link_100)")
+        var snapLink = ne_wait_widget(s, "link_100", 6.0f)
+        t |> success(snapLink != null, "link 12 -> 31 renders (link_100)")
+        if (snapLink != null) {
+            // Pin ids are unique per editor — assert the link resolves to the intended pins
+            // (12 = node 1's output, 31 = node 3's input). A pin-id collision would silently
+            // merge pins and misroute this; the explicit endpoints catch that.
+            var l = find_widget(snapLink, "{s.canvas}/link_100")
+            t |> equal(l?["payload"]?["from_pin"] ?? -1, 12, "link leaves node 1's output pin 12")
+            t |> equal(l?["payload"]?["to_pin"] ?? -1, 31, "link arrives at node 3's input pin 31")
+        }
     }
 }

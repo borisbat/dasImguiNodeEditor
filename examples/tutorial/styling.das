@@ -28,18 +28,6 @@ require imgui/imgui_node_editor_theme_daslang
 var g_ed : imgui_node_editor::EditorContext? = null
 var g_seeded : bool = false
 
-def render_pins() {
-    // Inputs attach on the left edge (pivot x = 0), outputs on the right (x = 1).
-    // Without a pivot the link springs from the pin label's center, which looks
-    // untidy once a node has several pins.
-    pin(11, (kind = PinKind.Input, pivot_alignment = float2(0.0, 0.5))) {
-        text("-> in")
-    }
-    pin(12, (kind = PinKind.Output, pivot_alignment = float2(1.0, 0.5))) {
-        text("out ->")
-    }
-}
-
 def draw_editor() {
     node_editor("graph", (editor = g_ed)) {
         if (!g_seeded) {
@@ -55,10 +43,19 @@ def draw_editor() {
                 text("out ->")
             }
         }
-        // (2) Default look — no tint, square corners, default border.
+        // (2) Default look — no tint, square corners, default border. Inputs attach on
+        // the left edge (pivot x = 0), outputs on the right (x = 1); without a pivot the
+        // link springs from the pin label's center, which looks untidy on a multi-pin node.
+        // Every pin id is unique across the whole editor — 21/22 here, distinct from node 1's
+        // output 12 and node 3's input 31 (same-id pins silently merge into one).
         node(2) {
             text("Passthrough")
-            render_pins()
+            pin(21, (kind = PinKind.Input, pivot_alignment = float2(0.0, 0.5))) {
+                text("-> in")
+            }
+            pin(22, (kind = PinKind.Output, pivot_alignment = float2(1.0, 0.5))) {
+                text("out ->")
+            }
         }
         // (3) The showcase node: a red tint, PLUS scoped style brackets — rounded
         // corners (a style VAR) and an amber border (a style COLOR). The two wrappers
