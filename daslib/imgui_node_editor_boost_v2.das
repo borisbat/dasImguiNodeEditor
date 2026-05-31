@@ -70,6 +70,60 @@ var private g_shortcuts : table<uint64; ShortcutState>
 // stash it so their lazy snapshot serializers can SetCurrentEditor before querying
 // geometry/selection by id.
 var private g_active_editor : void? = null
+var private g_active_handle : uint64 = 0ul     // intptr of the editor whose node_editor block is open (0 = none)
+
+// ===== duplicate-id tracker (on by default) =====
+//
+// node/pin/link ids are unique PER KIND per editor: BeginNode/BeginPin/Link do a
+// find-or-create on the id (FindObject is tag-discriminated, so a node and a pin may
+// share a value, but two pins may not). Two same-kind entities with the same id
+// silently MERGE into one editor object — the native CreatePin uniqueness assert is
+// debug-only and compiled out in Release. The merged object takes the last layout, so
+// e.g. a link routes to the wrong pin with no error or crash. A duplicate id is a broken
+// graph, so this tracker fails fast: per editor, per frame, each id is checked against the
+// ones already seen this frame and a duplicate PANICS (fatal, compiled in for Release too).
+// ON by default; set_node_editor_id_tracking(false) drops the per-entity set lookup+insert
+// where the ids are known-unique and the cost matters. node + node_group share the "nodes"
+// set (a group IS a node).
+
+struct private IdSeen {
+    nodes : table<int>      //! node() + node_group() ids (one node space)
+    pins  : table<int>      //! pin() ids
+    links : table<int>      //! link() ids
+}
+var private g_id_seen : table<uint64; IdSeen>   // keyed by editor handle (intptr)
+var private g_track_ids : bool = true
+
+def set_node_editor_id_tracking(on : bool) {
+    //! Toggle the per-frame duplicate-id check. node/pin/link ids must be unique per kind
+    //! within an editor; a collision silently merges two entities into one editor object
+    //! (the native uniqueness assert is compiled out in Release), so links route to the
+    //! wrong pin with no error. With the check ON (the default) a duplicate PANICS (fatal,
+    //! compiled in for Release too) — a broken graph should fail fast, not limp on. Turn it off
+    //! to drop the per-entity set lookup+insert in hot draw loops with known-unique ids.
+    g_track_ids = on
+}
+
+def private reset_id_seen(handle : uint64) {
+    // Clear the frame's seen-sets for this editor (auto-inserts an empty IdSeen on first
+    // use). Separate statements: one table lookup each, never two on g_id_seen per expr.
+    g_id_seen[handle].nodes |> clear()
+    g_id_seen[handle].pins |> clear()
+    g_id_seen[handle].links |> clear()
+}
+
+def private track_id(var seen : table<int>; id : int; kind : string) {
+    // A duplicate id is a broken graph: the native editor would silently merge the two
+    // same-id kinds into one object (its own uniqueness assert is compiled out in Release),
+    // misrouting links with no error. That's a program bug, so fail fast — panic is fatal and
+    // always compiled in, so this stops with diagnostics instead of letting the merge slip
+    // through. (panic, not verify, because the message interpolates kind/id — verify needs a
+    // constant message.)
+    if (key_exists(seen, id)) {
+        panic("dasImguiNodeEditor: duplicate {kind} id {id} in one editor — {kind} ids must be unique per editor; same-id {kind}s silently merge into one object. Fix the id, or call set_node_editor_id_tracking(false) to disable this check.")
+    }
+    seen |> insert(id)
+}
 
 // ===== editor canvas (app-owned context) =====
 //
@@ -128,6 +182,10 @@ def node_editor(editor : imgui_node_editor::EditorContext?; size : float2 = floa
     //! container_path_push/pop.)
     imgui_node_editor::SetCurrentEditor(editor)
     g_active_editor = unsafe(reinterpret<void?>(editor))
+    g_active_handle = intptr(editor)
+    if (g_track_ids) {
+        reset_id_seen(g_active_handle)   // start this editor's frame with empty seen-sets
+    }
     imgui_node_editor::Begin(widget_ident, size)
     // Tell the snapshot capture how to map this canvas's local item rects to screen,
     // so interior widgets (node titles, pin labels, drawlist art) report screen-space
@@ -149,6 +207,7 @@ def node_editor(editor : imgui_node_editor::EditorContext?; size : float2 = floa
     }
     imgui_node_editor::End()
     g_active_editor = null
+    g_active_handle = 0ul
     imgui_node_editor::SetCurrentEditor(null)
     var entry : WidgetEntry
     entry.serialize_ctx = unsafe(reinterpret<void?>(editor))
@@ -363,6 +422,9 @@ def node(id : NodeId; color : float4 = float4(-1.0, -1.0, -1.0, -1.0); blk : blo
     //! canvas-space rect. entry.bbox/entry.canvas_bbox are also set per frame. Child
     //! pins/text nest under this node's path. `widget_ident` is macro-injected
     //! (= "node_{id}").
+    if (g_track_ids && g_active_handle != 0ul) {
+        track_id(g_id_seen[g_active_handle].nodes, id, "node")
+    }
     let tinted = color.x >= 0.0
     if (tinted) {
         imgui_node_editor::PushStyleColor(StyleColor.NodeBg, color)
@@ -398,6 +460,9 @@ def node_group(id : NodeId; size : float2 = float2(200.0, 150.0); blk : block) {
     //! selected, z} is built lazily via node_payload (a group is geometrically a node) —
     //! `bbox` screen-space, `canvas_bbox` the editor canvas-space rect. `widget_ident`
     //! is macro-injected (= "node_group_{id}").
+    if (g_track_ids && g_active_handle != 0ul) {
+        track_id(g_id_seen[g_active_handle].nodes, id, "node")   // a group shares the node id space
+    }
     imgui_node_editor::BeginNode(id)
     invoke(blk)
     imgui_node_editor::Group(size)
@@ -427,6 +492,9 @@ def pin(id : PinId; kind : PinKind;
     //! to its right edge so links leave the node cleanly; a negative x (the -1 default on
     //! each) keeps the editor default for that axis. Registers as kind "pin"; payload {id}
     //! is built lazily (pin_payload). `widget_ident` is macro-injected (= "pin_{id}").
+    if (g_track_ids && g_active_handle != 0ul) {
+        track_id(g_id_seen[g_active_handle].pins, id, "pin")
+    }
     imgui_node_editor::BeginPin(id, kind)
     if (pivot_alignment.x >= 0.0) {
         imgui_node_editor::PinPivotAlignment(pivot_alignment)
@@ -463,6 +531,9 @@ def link(id : LinkId; from : PinId; to : PinId;
     //! Color/thickness defaulted (the generated bind doesn't surface the C++
     //! defaults) and overridable via the tuple. `widget_ident` is macro-injected
     //! (= "link_{id}").
+    if (g_track_ids && g_active_handle != 0ul) {
+        track_id(g_id_seen[g_active_handle].links, id, "link")
+    }
     imgui_node_editor::Link(id, from, to, color, thickness)
     var entry : WidgetEntry
     entry.serialize_id = id

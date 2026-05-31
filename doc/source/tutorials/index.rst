@@ -20,3 +20,6 @@ below).
    context_menus.rst
    create_by_drag.rst
    clipboard.rst
+   styling.rst
+   groups.rst
+   navigation.rst
