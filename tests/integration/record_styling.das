@@ -26,7 +26,7 @@ def main {
         }
         post_command(app, "set_user_control", JV((enabled = false)))
 
-        say(app, "node(id, color=...) tints a node's background — green for this source.", "{CANVAS}/node_1")
+        say(app, "node(id, color=...) tints a node's background - green for this source.", "{CANVAS}/node_1")
         wait_for_mouse_idle(app)
         say(app, "No tint, square corners: the editor's default node look.", "{CANVAS}/node_2")
         wait_for_mouse_idle(app)
