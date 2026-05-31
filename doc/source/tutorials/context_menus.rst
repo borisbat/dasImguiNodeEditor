@@ -4,8 +4,9 @@
 Context menus
 #############
 
-Right-click the canvas, a node, or a link and the editor tells you what was hit so
-you can pop the matching menu. The catch: the editor draws in **canvas space**
+Right-click the canvas or a node and the editor tells you what was hit so you can pop
+the matching menu (links have one too — see ``show_link_context_menu`` below). The catch:
+the editor draws in **canvas space**
 (panned and zoomed), but ImGui popups are plain windows in **screen space**. So the
 hit-test *and* the popup windows live inside a ``Suspend``/``Resume`` island —
 ``with_suspended`` — which steps out of the canvas transform for the duration.

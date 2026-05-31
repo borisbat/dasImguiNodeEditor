@@ -5,7 +5,7 @@ require imgui/imgui_node_editor_boost_v2
 require imgui/imgui_node_editor_live
 
 // =============================================================================
-// TUTORIAL: context_menus — right-click menus on the canvas, a node, or a link.
+// TUTORIAL: context_menus — right-click menus on the canvas or a node.
 //
 //   with_suspended() {                              -- enter screen space for popups
 //       if (show_node_context_menu(ed, nid)) {      -- right-click landed on a node

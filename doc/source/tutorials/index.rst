@@ -18,3 +18,5 @@ below).
    connect_by_drag.rst
    delete_and_select.rst
    context_menus.rst
+   create_by_drag.rst
+   clipboard.rst
