@@ -34,12 +34,7 @@ Source: ``examples/tutorial/navigation.das``.
 Walkthrough
 ***********
 
-.. raw:: html
-
-   <video autoplay loop muted playsinline width="100%">
-     <source src="../_static/tutorials/navigation.mp4" type="video/mp4">
-     Your browser doesn't support HTML5 video. <a href="../_static/tutorials/navigation.mp4">Download the recording</a>.
-   </video>
+.. video:: navigation.mp4
 
 .. literalinclude:: ../../../examples/tutorial/navigation.das
    :language: das

@@ -31,12 +31,7 @@ Source: ``examples/tutorial/clipboard.das``.
 Walkthrough
 ***********
 
-.. raw:: html
-
-   <video autoplay loop muted playsinline width="100%">
-     <source src="../_static/tutorials/clipboard.mp4" type="video/mp4">
-     Your browser doesn't support HTML5 video. <a href="../_static/tutorials/clipboard.mp4">Download the recording</a>.
-   </video>
+.. video:: clipboard.mp4
 
 .. literalinclude:: ../../../examples/tutorial/clipboard.das
    :language: das
