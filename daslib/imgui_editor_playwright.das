@@ -108,6 +108,14 @@ def public ne_wait_widget(s : EditorSession; subpath : string; timeout_sec : flo
     return wait_for_widget(s.app, "{s.canvas}/{subpath}", timeout_sec)
 }
 
+def public ne_wait_selected(s : EditorSession; id : int; timeout_sec : float = 5.0f) : JsonValue? {
+    //! Poll until node `id` is selected. Gate a selection-dependent chord (Ctrl+D / Ctrl+C) on
+    //! the click's real effect, not a frame/time guess. Returns the snapshot, or null on timeout.
+    return wait_until_sec(s.app, timeout_sec) $(var snap) {
+        return ne_node_selected(snap, s, id)
+    }
+}
+
 def public ne_wait_payload_str(s : EditorSession; field : string; expected : string;
                                timeout_sec : float = 5.0f) : JsonValue? {
     //! Poll until the canvas payload's `field` (a string) equals `expected`. Returns the

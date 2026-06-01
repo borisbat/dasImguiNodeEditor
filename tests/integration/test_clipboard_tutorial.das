@@ -35,6 +35,7 @@ def test_clipboard_tutorial(t : T?) {
         // ---- duplicate: click node A (selects + focuses), Ctrl+D ----
         click(d, "{canvas}/node_1/NODE_TITLE[1]")
         wait_for_mouse_idle(d)
+        t |> success(ne_wait_selected(s, 1) != null, "node_1 selected before Ctrl+D")
         post_command(d, "imgui_key_chord", JV((mods = ["Ctrl"], key = "D")))
         t |> success(wait_for_key_idle(d, 4.0f), "Ctrl+D chord completes")
         var dup = ne_wait_widget(s, "node_200", 6.0f)
@@ -44,6 +45,7 @@ def test_clipboard_tutorial(t : T?) {
         // ---- copy + paste: click node B, Ctrl+C then Ctrl+V ----
         click(d, "{canvas}/node_2/NODE_TITLE[2]")
         wait_for_mouse_idle(d)
+        t |> success(ne_wait_selected(s, 2) != null, "node_2 selected before Ctrl+C")
         post_command(d, "imgui_key_chord", JV((mods = ["Ctrl"], key = "C")))
         t |> success(wait_for_key_idle(d, 4.0f), "Ctrl+C chord completes")
         post_command(d, "imgui_key_chord", JV((mods = ["Ctrl"], key = "V")))
