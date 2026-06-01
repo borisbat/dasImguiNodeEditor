@@ -32,12 +32,7 @@ Source: ``examples/tutorial/connect_by_drag.das``.
 Walkthrough
 ***********
 
-.. raw:: html
-
-   <video autoplay loop muted playsinline width="100%">
-     <source src="../_static/tutorials/connect_by_drag.mp4" type="video/mp4">
-     Your browser doesn't support HTML5 video. <a href="../_static/tutorials/connect_by_drag.mp4">Download the recording</a>.
-   </video>
+.. video:: connect_by_drag.mp4
 
 .. literalinclude:: ../../../examples/tutorial/connect_by_drag.das
    :language: das
