@@ -47,6 +47,7 @@ jobs:
         with:
           repository: borisbat/dasImgui
           path: dasImgui
+          ref: bbatkin/synth-chord-frame-paced   # TEMP: validate dasImgui#100 chord fix on POSIX; REVERT to track master before merge
 
       - name: "Checkout dasImguiNodeEditor"
         uses: actions/checkout@v4
