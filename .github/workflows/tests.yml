@@ -82,15 +82,6 @@ jobs:
           brew install glfw freetype bison
           echo "/opt/homebrew/opt/bison/bin" >> "$GITHUB_PATH"
 
-      - name: "Install OpenSSL via vcpkg (Windows)"
-        if: matrix.os == 'windows-latest'
-        run: |
-          git clone https://github.com/microsoft/vcpkg
-          ./vcpkg/bootstrap-vcpkg.sh
-          ./vcpkg/vcpkg install openssl:x64-windows --binarycaching
-          echo "VCPKG_ROOT=$(pwd)/vcpkg" >> $GITHUB_ENV
-          echo "/c/Strawberry/perl/bin" >> $GITHUB_PATH
-
       - name: "Install CMake and Ninja"
         uses: lukka/get-cmake@latest
 
@@ -99,29 +90,49 @@ jobs:
         # Put cl.exe / link.exe / lib.exe on PATH so the bash build step can
         # drive Ninja with MSVC. msvc-dev-cmd exports the dev-env vars to
         # $GITHUB_ENV, which subsequent bash steps inherit.
+        # MUST run BEFORE the vcpkg step below: msvc-dev-cmd's vcvars sets
+        # VCPKG_ROOT to the VS-bundled vcpkg, so the vcpkg step has to write our
+        # VCPKG_ROOT last for the build to find our prebuilt openssl.
         uses: ilammy/msvc-dev-cmd@v1
         with:
           arch: x64
 
+      - name: "Install OpenSSL via vcpkg (Windows)"
+        if: matrix.os == 'windows-latest'
+        # Runs after msvc-dev-cmd so our VCPKG_ROOT wins (see above).
+        run: |
+          git clone https://github.com/microsoft/vcpkg
+          ./vcpkg/bootstrap-vcpkg.sh
+          ./vcpkg/vcpkg install openssl:x64-windows --binarycaching
+          echo "VCPKG_ROOT=$(pwd)/vcpkg" >> $GITHUB_ENV
+          echo "/c/Strawberry/perl/bin" >> $GITHUB_PATH
+
       - name: "Build daslang + daslang-live + shared modules"
         working-directory: daslang-src
         # Ninja on all three OSes (single-config Release, binaries in bin/).
-        # Windows: cl.exe via msvc-dev-cmd; OpenSSL prebuilt from vcpkg so dasHV
-        # skips its perl+nmake source build. MSBuild was ~1.5-2x slower here.
+        # Windows: cl.exe via msvc-dev-cmd; OpenSSL prebuilt from vcpkg
+        # (toolchain QUOTED — $VCPKG_ROOT can contain spaces). MSBuild was
+        # ~1.5-2x slower here.
         run: |
           set -eux
-          EXTRA_CMAKE=""
           if [ "${{ matrix.os }}" = "windows-latest" ]; then
-            EXTRA_CMAKE="-DCMAKE_TOOLCHAIN_FILE=$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake"
+            cmake --no-warn-unused-cli -B./build \
+              -DCMAKE_BUILD_TYPE:STRING=Release \
+              -DDAS_HV_DISABLED=OFF \
+              -DDAS_PUGIXML_DISABLED=OFF \
+              -DDAS_LLVM_DISABLED=ON \
+              -DDAS_GLFW_DISABLED=OFF \
+              -DCMAKE_TOOLCHAIN_FILE="$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" \
+              -G Ninja
+          else
+            cmake --no-warn-unused-cli -B./build \
+              -DCMAKE_BUILD_TYPE:STRING=Release \
+              -DDAS_HV_DISABLED=OFF \
+              -DDAS_PUGIXML_DISABLED=OFF \
+              -DDAS_LLVM_DISABLED=ON \
+              -DDAS_GLFW_DISABLED=OFF \
+              -G Ninja
           fi
-          cmake --no-warn-unused-cli -B./build \
-            -DCMAKE_BUILD_TYPE:STRING=Release \
-            -DDAS_HV_DISABLED=OFF \
-            -DDAS_PUGIXML_DISABLED=OFF \
-            -DDAS_LLVM_DISABLED=ON \
-            -DDAS_GLFW_DISABLED=OFF \
-            $EXTRA_CMAKE \
-            -G Ninja
           cmake --build ./build --parallel --target \
             daslang daslang-live \
             dasModuleLiveHost dasModuleGlfw dasModuleHV \
