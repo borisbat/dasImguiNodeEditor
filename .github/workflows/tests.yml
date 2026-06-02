@@ -53,6 +53,19 @@ jobs:
         with:
           path: dasImguiNodeEditor
 
+      - name: "Exclude workspace from Windows Defender (Windows)"
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        continue-on-error: true
+        # Real-time Defender scans every .obj/.exe/.dll the build writes and
+        # every process + DLL load at test time; excluding the workspace cuts
+        # both compile and run wall-time. continue-on-error: a managed-Defender
+        # runner must not fail the job.
+        run: |
+          Add-MpPreference -ExclusionPath "${{ github.workspace }}"
+          Add-MpPreference -ExclusionProcess "daslang.exe"
+          Add-MpPreference -ExclusionProcess "daslang-live.exe"
+
       - name: "Install system dependencies (Linux)"
         if: matrix.os == 'ubuntu-latest'
         run: |
@@ -81,37 +94,39 @@ jobs:
       - name: "Install CMake and Ninja"
         uses: lukka/get-cmake@latest
 
+      - name: "Set up MSVC environment (Windows)"
+        if: matrix.os == 'windows-latest'
+        # Put cl.exe / link.exe / lib.exe on PATH so the bash build step can
+        # drive Ninja with MSVC. msvc-dev-cmd exports the dev-env vars to
+        # $GITHUB_ENV, which subsequent bash steps inherit.
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
       - name: "Build daslang + daslang-live + shared modules"
         working-directory: daslang-src
+        # Ninja on all three OSes (single-config Release, binaries in bin/).
+        # Windows: cl.exe via msvc-dev-cmd; OpenSSL prebuilt from vcpkg so dasHV
+        # skips its perl+nmake source build. MSBuild was ~1.5-2x slower here.
         run: |
           set -eux
+          EXTRA_CMAKE=""
           if [ "${{ matrix.os }}" = "windows-latest" ]; then
-            cmake --no-warn-unused-cli -B./build \
-              -DDAS_HV_DISABLED=OFF \
-              -DDAS_PUGIXML_DISABLED=OFF \
-              -DDAS_LLVM_DISABLED=ON \
-              -DDAS_GLFW_DISABLED=OFF \
-              -DCMAKE_TOOLCHAIN_FILE="$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" \
-              -G "Visual Studio 17 2022" -T host=x64 -A x64
-            cmake --build ./build --config Release --parallel --target \
-              daslang daslang-live \
-              dasModuleLiveHost dasModuleGlfw dasModuleHV \
-              dasModulePUGIXML dasModuleStbImage
-            echo "BIN_DIR=bin/Release" >> "$GITHUB_ENV"
-          else
-            cmake --no-warn-unused-cli -B./build \
-              -DCMAKE_BUILD_TYPE:STRING=Release \
-              -DDAS_HV_DISABLED=OFF \
-              -DDAS_PUGIXML_DISABLED=OFF \
-              -DDAS_LLVM_DISABLED=ON \
-              -DDAS_GLFW_DISABLED=OFF \
-              -G Ninja
-            cmake --build ./build --parallel --target \
-              daslang daslang-live \
-              dasModuleLiveHost dasModuleGlfw dasModuleHV \
-              dasModulePUGIXML dasModuleStbImage
-            echo "BIN_DIR=bin" >> "$GITHUB_ENV"
+            EXTRA_CMAKE="-DCMAKE_TOOLCHAIN_FILE=$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake"
           fi
+          cmake --no-warn-unused-cli -B./build \
+            -DCMAKE_BUILD_TYPE:STRING=Release \
+            -DDAS_HV_DISABLED=OFF \
+            -DDAS_PUGIXML_DISABLED=OFF \
+            -DDAS_LLVM_DISABLED=ON \
+            -DDAS_GLFW_DISABLED=OFF \
+            $EXTRA_CMAKE \
+            -G Ninja
+          cmake --build ./build --parallel --target \
+            daslang daslang-live \
+            dasModuleLiveHost dasModuleGlfw dasModuleHV \
+            dasModulePUGIXML dasModuleStbImage
+          echo "BIN_DIR=bin" >> "$GITHUB_ENV"
 
       - name: "daspkg install dasImgui (global)"
         # dasImgui first — the node-editor C++ module links dasModuleImgui and
