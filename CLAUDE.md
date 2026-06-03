@@ -35,8 +35,13 @@ daslib module MUST get its own line there, or `require imgui/<name>` fails with
   `project_root: "D:/Work/IMGUI"`).
 - **C++ build:** `cmake --build D:/DASPKG/dasImguiNodeEditor/_build --config Release -j 64`
   (configure once with `-DDASLANG_DIR=D:/Work/daScript`). **dasImgui must be built first**
-  (sibling under the same parent — the node-editor C++ links `dasModuleImgui`). **Shut down
-  `daslang-live` before relinking** — it holds `dasModuleImguiNodeEditor.shared_module` open.
+  (sibling under the same parent — the node-editor C++ links `dasModuleImgui`; the configure
+  derives `DAS_IMGUI_DIR` as `<repo-parent>/dasImgui`). **Shut down `daslang-live` before
+  relinking** — it holds `dasModuleImguiNodeEditor.shared_module` open.
+- **Stale-build-dir gotcha (cmake upgrade):** if `cmake --build` fails its reconfigure with
+  `.../share/cmake-<old>/Modules/... does not exist`, the `_build` dir is pinned to a removed
+  cmake version — delete it and reconfigure from the repo root:
+  `rm -rf _build && cmake -B _build -S . -DDASLANG_DIR=D:/Work/daScript`.
 - **daslang-live auto-reloads on `.das` save.** A restart IS needed for: a new `.das_module`
   module, CLI-flag changes, and one-time-`init()` changes (the `EditorContext` + module
   globals survive reload, so first-run-gated code won't re-fire).
