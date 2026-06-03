@@ -33,6 +33,11 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      # Cache daslang's C++ object compilation across runs (GitHub Actions cache
+      # backend), shared with tests.yml's sccache. See the "Set up sccache" step
+      # + the CMAKE_*_COMPILER_LAUNCHER flags on the cmake configure below.
+      SCCACHE_GHA_ENABLED: "true"
     steps:
       - name: "Checkout daslang"
         uses: actions/checkout@v4
@@ -67,6 +72,11 @@ jobs:
       - name: "Install CMake and Ninja"
         uses: lukka/get-cmake@latest
 
+      - name: "Set up sccache"
+        # Installs the sccache binary and wires the GitHub Actions cache backend
+        # (gated by SCCACHE_GHA_ENABLED at the job level).
+        uses: mozilla-actions/sccache-action@v0.0.9
+
       - name: "Install Python dependencies"
         run: pip install -r daslang-src/doc/requirements.txt
 
@@ -80,8 +90,11 @@ jobs:
             -DDAS_PUGIXML_DISABLED=OFF \
             -DDAS_LLVM_DISABLED=ON \
             -DDAS_GLFW_DISABLED=OFF \
+            -DCMAKE_C_COMPILER_LAUNCHER=sccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=sccache \
             -G Ninja
           cmake --build ./build --parallel --target daslang
+          sccache --show-stats
 
       - name: "Lint changed .das files"
         # Mirrors dasImgui's docs.yml lint step, with both modules on the load
