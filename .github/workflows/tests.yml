@@ -177,6 +177,19 @@ jobs:
 
       - name: "Run integration tests (headless)"
         working-directory: ${{ github.workspace }}/daslang-src
+        # --isolated-mode + --isolated-mode-threads 4: each test runs in its own
+        # subprocess, with 4 in parallel. dastest brands each subprocess argv with
+        # --worker-index N (N in 0..3); with_node_editor_app is a thin wrapper over
+        # dasImgui's with_imgui_app, which reads --worker-index and derives a
+        # per-worker live-API port (9090 + N), passed to the spawned daslang-live
+        # as --live-port. So the 4 workers bind ports 9090/9091/9092/9093 and don't
+        # race for 9090. Mirrors dasImgui's tests.yml (~3x wall-time reduction).
+        #
+        # No --exclude entries: unlike dasImgui, the node-editor suite has no
+        # GLFW-event-queue synth tests (glfw_synth / key_hud) and no >16-POST
+        # Windows-stall tests — every test drives synth IO through the harness and
+        # stays within libhv's per-subprocess POST ceiling. Add excludes here if a
+        # heavy test is later introduced.
         env:
           DASLIVE_HV_LOG: stderr
           DASLIVE_HV_LOG_LEVEL: DEBUG
@@ -185,4 +198,6 @@ jobs:
           ${BIN_DIR}/daslang dastest/dastest.das -- \
             --test modules/dasImguiNodeEditor/tests/integration \
             --timeout 600 \
+            --isolated-mode \
+            --isolated-mode-threads 4 \
             --headless
