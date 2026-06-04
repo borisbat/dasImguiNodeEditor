@@ -13,8 +13,8 @@ require daslib/json_boost public
 //! chain, press Delete, and watch B plus the two links on its pins cascade away. Voiced
 //! and self-verifying: the click MUST select B, and the Delete MUST remove B and both
 //! its links, or the recording aborts at teardown. Pulses the chain first to show it is
-//! live before it is cut. The headless regression for the same gesture is
-//! test_delete_and_select.das.
+//! live before it is cut, and the imgui_key_hud pops a [Del] keycap as the key fires. The
+//! headless regression for the same gesture is test_delete_and_select.das.
 
 let CANVAS = "MAIN_WIN/graph"
 
@@ -42,6 +42,10 @@ def main {
             panic("{T_B} never rendered - wrong app running?")
         }
         let sel_pt = title_point(snap, T_B)
+
+        // Keyboard helper: pop a [Del] keycap bottom-center when the key fires (no modifiers
+        // - Delete is a plain key, not a chord); keycap_fade_s lingers it through the voice.
+        post_command(app, "imgui_key_hud", JV((enabled = true, show_modifiers = false, keycap_fade_s = 2.5f)))
 
         // ---- Beat 1: the chain ----
         record_check_rendered(app, T_B, true)
@@ -73,14 +77,18 @@ def main {
             [voice = "Click a node to select it - the editor highlights the selection for you."])
 
         // ---- Beat 4: Delete -> B and both its links cascade ----
+        // Fire Delete partway into the voice so the [Del] keycap pops as the line names it.
         let del = int(ImGuiKey.Delete)
+        let dwell2 = say_begin(app, "Delete -> B + both links cascade", "{CANVAS}/node_1",
+            [voice = "Press Delete and the editor raises B through begin_delete; accepting it drops B and cascades the two links on its pins. A and C remain, disconnected."])
+        let lead = dwell2 > 1200u ? 700u : dwell2 / 3u
+        sleep(lead)
         post_command(app, "imgui_key_press", JV((key = del)))
         post_command(app, "imgui_key_release", JV((key = del)))
         // Hard self-verify: B is gone AND both links cascaded out, or abort at teardown.
         record_check_rendered(app, T_B, false)
         record_check_rendered(app, T_L100, false)
         record_check_rendered(app, T_L101, false)
-        say(app, "Delete -> B + both links cascade", "{CANVAS}/node_1",
-            [voice = "Press Delete and the editor raises B through begin_delete; accepting it drops B and cascades the two links on its pins. A and C remain, disconnected."])
+        sleep(dwell2 > lead ? dwell2 - lead : 0u)
     }
 }
