@@ -9,21 +9,17 @@ require imgui/imgui_editor_playwright public
 require daslib/json public
 require daslib/json_boost public
 
-//! Driver: record delete_and_select.apng — select the middle node, press Delete, and
-//! watch the node plus the two links on its pins cascade away. Narrated, with a
-//! synthetic left-click to select then a synthetic Delete key. Run with
-//! `daslang tests/integration/record_delete_and_select.das`, then ffmpeg the .apng to .mp4.
-//!
-//! NB: set_user_control(false) hands IO fully to the synthetic timeline — without it
-//! the real OS cursor races the synth and the canvas never gains hover, so the Delete
-//! key's CanAcceptUserInput gate stays shut. The editor's native Delete key raises the
-//! selection through begin_delete — the same path delete_and_select.das handles. The
-//! title row selects the node (its center hits a pin, which eats the click).
+//! Driver: record delete_and_select.apng - select the middle node of an A -> B -> C
+//! chain, press Delete, and watch B plus the two links on its pins cascade away. Voiced
+//! and self-verifying: the click MUST select B, and the Delete MUST remove B and both
+//! its links, or the recording aborts at teardown. Pulses the chain first to show it is
+//! live before it is cut. The headless regression for the same gesture is
+//! test_delete_and_select.das.
 
 let CANVAS = "MAIN_WIN/graph"
 
 def title_point(var snap : JsonValue?; ident : string) : tuple<float; float> {
-    // The node's title row (top edge) — clicking the center hits a pin item, which
+    // The node's title row (top edge) - clicking the center hits a pin item, which
     // eats the click; the title row reliably selects the node.
     let b = find_widget(snap, ident)?["bbox"]
     return (((b?["x"] ?? 0.0f) + (b?["z"] ?? 0.0f)) * 0.5f, (b?["y"] ?? 0.0f) + 10.0f)
@@ -32,53 +28,59 @@ def title_point(var snap : JsonValue?; ident : string) : tuple<float; float> {
 [export]
 def main {
     with_node_editor_recording_app("examples/tutorial/delete_and_select.das",
-                                   "delete_and_select.apng", 45) $(app) {
-        var snap = wait_for_widget(app, "{CANVAS}/node_2", 15.0f)
-        if (snap == null) {
-            panic("{CANVAS}/node_2 never rendered — wrong app running?")
+                                   "delete_and_select.apng", 55) $(app) {
+        let T_B = "{CANVAS}/node_2"
+        let T_L100 = "{CANVAS}/link_100"
+        let T_L101 = "{CANVAS}/link_101"
+
+        let s = ne_open(app, CANVAS)
+        if (s.handle == uint64(0)) {
+            panic("{CANVAS} never rendered / no editor handle - wrong app running?")
         }
-        // Synthetic IO only — no real-cursor race (see header note).
-        post_command(app, "set_user_control", JV((enabled = false)))
+        var snap = wait_for_widget(app, T_B, 15.0f)
+        if (snap == null) {
+            panic("{T_B} never rendered - wrong app running?")
+        }
+        let sel_pt = title_point(snap, T_B)
 
-        let sel_pt = title_point(snap, "{CANVAS}/node_2")
+        // ---- Beat 1: the chain ----
+        record_check_rendered(app, T_B, true)
+        say(app, "A -> B -> C: two links", T_B,
+            [voice = "Here is a tiny chain - node A to B to C, joined by two links."])
 
-        say(app, "A -> B -> C: one chain, two links. We will delete the middle node, B.", "{CANVAS}/node_2")
+        // ---- Beat 2: show it is live (pulse both links) ----
+        let dwell = say_begin(app, "the chain is live", T_B,
+            [voice = "Both links carry data end to end - we can pulse them to see the chain is live before we cut it."])
+        var pulses = int(dwell) / 500
+        if (pulses < 4) { pulses = 4 }
+        let interval = dwell / uint(pulses)
+        for (_i in range(pulses)) {
+            ne_flow(s, 100)
+            ne_flow(s, 101)
+            sleep(interval)
+        }
 
-        // Select B (title-row click). wait_for_mouse_idle lets the click fully drain
-        // before we poll the selection (the snapshot-during-recording lesson from #2).
+        // ---- Beat 3: select B (title-row click) ----
         move_to(app, sel_pt, 700)
         wait_for_mouse_idle(app)
-        say(app, "Click a node to select it - the editor highlights the selection.", "{CANVAS}/node_2")
         var ev : array<JsonValue?>
         ev |> click_at(0, sel_pt, 250, 0)
         post_command(app, "imgui_mouse_play", JV((events = ev)))
         wait_for_mouse_idle(app)
-        var selSnap = wait_until_sec(app, 6.0f) $(var sn) {
-            return find_widget(sn, "{CANVAS}/node_2")?["payload"]?["selected"] ?? false
-        }
-        print("SELECT node_2 -> {selSnap != null}\n")
+        // Hard self-verify: the click MUST select B.
+        record_check_value(app, T_B, "selected", true)
+        say(app, "click B to select it", T_B,
+            [voice = "Click a node to select it - the editor highlights the selection for you."])
 
-        // Press Delete: the editor raises the selection through begin_delete, where the
-        // app accepts it and cascades the dangling links.
-        say(app, "Press Delete - the editor raises the selection through begin_delete; the app accepts it.", "{CANVAS}/node_2")
+        // ---- Beat 4: Delete -> B and both its links cascade ----
         let del = int(ImGuiKey.Delete)
-        post_command(app, "imgui_key_press",   JV((key = del)))
+        post_command(app, "imgui_key_press", JV((key = del)))
         post_command(app, "imgui_key_release", JV((key = del)))
-
-        // Gate: B is gone AND both its links cascaded out.
-        var goneSnap = wait_until_sec(app, 8.0f) $(var sn) {
-            return !widget_exists(sn, "{CANVAS}/node_2")
-        }
-        let node_gone = goneSnap != null
-        let links_gone = (node_gone &&
-            !widget_exists(goneSnap, "{CANVAS}/link_100") &&
-            !widget_exists(goneSnap, "{CANVAS}/link_101"))
-        print("DELETE node_2 gone -> {node_gone}, links cascaded -> {links_gone}\n")
-
-        if (links_gone) {
-            say(app, "accept_deleted_node removed B; the two links on its pins cascaded away. A and C remain, disconnected.", "{CANVAS}/node_1")
-        } else {
-            say(app, "(the delete did not land - check the selection / Delete key)", "{CANVAS}/node_2")
-        }
+        // Hard self-verify: B is gone AND both links cascaded out, or abort at teardown.
+        record_check_rendered(app, T_B, false)
+        record_check_rendered(app, T_L100, false)
+        record_check_rendered(app, T_L101, false)
+        say(app, "Delete -> B + both links cascade", "{CANVAS}/node_1",
+            [voice = "Press Delete and the editor raises B through begin_delete; accepting it drops B and cascades the two links on its pins. A and C remain, disconnected."])
     }
 }
