@@ -34,6 +34,11 @@ Walkthrough
 
 .. video:: connect_by_drag.mp4
 
+The recording is voiced and self-verifying: a real synthetic pin-drag commits
+the link, the recording asserts it committed (a no-op aborts at teardown), then
+pulses the new link with ``flow()`` to show data running output pin 11 -> input
+pin 21.
+
 .. literalinclude:: ../../../examples/tutorial/connect_by_drag.das
    :language: das
    :linenos:
