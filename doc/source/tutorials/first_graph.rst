@@ -32,6 +32,10 @@ Walkthrough
 
 .. video:: first_graph.mp4
 
+The recording is voiced and self-verifying: it tours each construct in turn and
+asserts every one rendered, then closes by pulsing the link with ``flow()`` to
+watch data travel from output pin 11 to input pin 21.
+
 .. literalinclude:: ../../../examples/tutorial/first_graph.das
    :language: das
    :linenos:
@@ -58,3 +62,8 @@ Links
 ``link(id, from_pin, to_pin)`` draws an edge from an output pin to an input
 pin. This graph hard-codes the one link; :ref:`tutorial_ne_connect_by_drag`
 makes links with the mouse.
+
+``flow(ctx, link_id)`` fires a one-shot data-flow pulse along a link — a marker
+that travels the edge and fades over ``style.FlowDuration``. The walkthrough
+re-pulses it so the link visibly carries data; from a live host it is the
+``flow`` command (``ne_flow`` in the playwright helpers).

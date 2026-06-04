@@ -62,6 +62,10 @@ def public ne_delete_link(s : EditorSession; id : int) : JsonValue? {
     return post_command(s.app, "delete_link_cmd", JV((editor = s.handle, id = id)))
 }
 
+def public ne_flow(s : EditorSession; link_id : int; backward : bool = false) : JsonValue? {
+    return post_command(s.app, "flow_cmd", JV((editor = s.handle, id = link_id, backward = backward)))
+}
+
 def public ne_move_node(s : EditorSession; id : int; x : float; y : float) : JsonValue? {
     return post_command(s.app, "move_node", JV((editor = s.handle, id = id, x = x, y = y)))
 }

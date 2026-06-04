@@ -45,7 +45,7 @@ def document_module_imgui_editor_playwright() {
     var mod = find_module("imgui_editor_playwright")
     var groups <- array<DocGroup>(
         group_by_regex("Session",            mod, %regex~^ne_open$%%),
-        group_by_regex("Actions",            mod, %regex~^(ne_select_node|ne_select_link|ne_clear_selection|ne_shortcut|ne_add_link|ne_delete_node|ne_delete_link|ne_move_node|ne_new_node_drag)$%%),
+        group_by_regex("Actions",            mod, %regex~^(ne_select_node|ne_select_link|ne_clear_selection|ne_shortcut|ne_add_link|ne_delete_node|ne_delete_link|ne_move_node|ne_new_node_drag|ne_flow)$%%),
         group_by_regex("Snapshots & queries", mod, %regex~^(ne_snapshot|ne_node_count|ne_payload|ne_node|ne_node_exists|ne_node_selected)$%%),
         group_by_regex("Polling / await",    mod, %regex~^(ne_wait_widget|ne_wait_selected|ne_wait_payload_str|ne_wait_shortcut)$%%),
         hide_group(group_by_regex("Internal", mod, %regex~^(_|priv_).*%%))
