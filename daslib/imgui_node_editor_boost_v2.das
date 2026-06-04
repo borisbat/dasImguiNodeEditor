@@ -261,9 +261,10 @@ def flow(ctx : imgui_node_editor::EditorContext?; link_id : LinkId;
 // SCALE_TO_MONITOR/DPI workaround — see shader_graph.das).
 
 def center_node_on_screen(ctx : imgui_node_editor::EditorContext?; id : NodeId) : bool {
-    //! Pan the viewport so `id` is centered. Transient view action (no zoom change);
-    //! no-op for a null ctx. (May share NavigateToContent's DPI quirk under
-    //! SCALE_TO_MONITOR — call inside the draw loop if the bracketed form mis-centers.)
+    //! MOVES node `id` to the center of the current view - despite the name, upstream
+    //! CenterNodeOnScreen translates the node's bounds (and marks a user position change);
+    //! it does NOT pan the view. Use it to recall a stray node, not to navigate. No-op for
+    //! a null ctx. (NavigateToContent / navigate_to_selection are the view-only ops.)
     return false if (ctx == null)
     imgui_node_editor::SetCurrentEditor(ctx)
     imgui_node_editor::CenterNodeOnScreen(id)

@@ -9,12 +9,12 @@ require imgui/imgui_editor_playwright public
 require daslib/json public
 require daslib/json_boost public
 
-//! Headless regression for the navigation tutorial. The view ops (NavigateToContent,
-//! navigate_to_selection, center_node_on_screen) carry no observable state of their own,
-//! but they move the VIEW — so a node's SCREEN-space bbox shifts even though its canvas
-//! position is unchanged. The graph is seeded wide (node 3 at canvas 1180,560), so a real
-//! click on the "Fit All" button zooms out + recenters and node 3's screen center moves
-//! measurably. That shift is the assertion.
+//! Headless regression for the navigation tutorial. NavigateToContent (Fit All) and
+//! navigate_to_selection (Frame Selection) are VIEW ops — a node's SCREEN-space bbox shifts
+//! while its canvas position holds. center_node_on_screen is NOT a view op: despite the
+//! name it MOVES the node to the view center (upstream CenterNodeOnScreen translates the
+//! node bounds). This test asserts both: Fit All moves node 3's screen center (the graph is
+//! seeded wide, node 3 at canvas 1180,560), and Center #1 moves node 1's CANVAS bbox.
 
 let SUBJECT = "modules/dasImguiNodeEditor/examples/tutorial/navigation.das"
 
@@ -47,5 +47,18 @@ def test_navigation(t : T?) {
             return dx * dx + dy * dy > 400.0f   // shifted > 20px in screen space
         }
         t |> success(moved != null, "Fit All moved the view (node_3 screen center shifted > 20px)")
+
+        // The footgun: center_node_on_screen MOVES node 1 (not the view). Assert its
+        // canvas-space bbox changes after a real "Center #1" click.
+        var snap2 = ne_wait_widget(s, "node_1", 5.0f)
+        t |> success(snap2 != null, "node_1 present before Center #1")
+        if (snap2 == null) return
+        let n1_canvas_before = write_json(widget_payload_field(snap2, "{s.canvas}/node_1", "canvas_bbox"))
+        click(d, "MAIN_WIN/CENTER_FIRST")
+        var node_moved = wait_until_sec(d, 6.0f) $(var sn) {
+            let now = widget_payload_field(sn, "{s.canvas}/node_1", "canvas_bbox")
+            return now != null && write_json(now) != n1_canvas_before
+        }
+        t |> success(node_moved != null, "Center #1 MOVED node 1's canvas bbox (it relocates the node, not the view)")
     }
 }

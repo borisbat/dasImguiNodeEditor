@@ -5,18 +5,20 @@ require imgui/imgui_node_editor_boost_v2
 require imgui/imgui_node_editor_live
 
 // =============================================================================
-// TUTORIAL: navigation — move the VIEW, not the nodes.
+// TUTORIAL: navigation — the view ops, and the one that fools you.
 //
-//   NavigateToContent(duration)            -- fit the whole graph to the viewport
-//   navigate_to_selection(ed, zoomIn, dur) -- frame just the selected nodes
-//   center_node_on_screen(ed, nodeId)      -- pan a node to the viewport center
+//   NavigateToContent(duration)            -- fit the whole graph to the viewport (VIEW)
+//   navigate_to_selection(ed, zoomIn, dur) -- frame just the selected nodes        (VIEW)
+//   center_node_on_screen(ed, nodeId)      -- MOVES the node to the view center    (GRAPH!)
 //
 // The editor separates the GRAPH (node positions, in canvas space) from the VIEW
-// (the pan + zoom that maps canvas to screen). These three ops change only the
-// view — no node moves. Placement matters: NavigateToContent must run INSIDE the
-// node_editor block with the editor current, so the app raises a flag and services
-// it there; navigate_to_selection / center_node_on_screen are bracketed wrappers
-// that set the editor current themselves, so the toolbar buttons call them directly.
+// (the pan + zoom that maps canvas to screen). Fit All and Frame Selection change only
+// the view — no node moves. center_node_on_screen is the footgun: despite the name,
+// upstream CenterNodeOnScreen MOVES the node to the view center, it does not pan.
+// Placement also matters: NavigateToContent must run INSIDE the node_editor block with
+// the editor current, so the app raises a flag and services it there;
+// navigate_to_selection / center_node_on_screen are bracketed wrappers that set the
+// editor current themselves, so the toolbar buttons call them directly.
 //
 // STANDALONE: daslang.exe modules/dasImguiNodeEditor/examples/tutorial/navigation.das
 // LIVE:       daslang-live modules/dasImguiNodeEditor/examples/tutorial/navigation.das
@@ -47,7 +49,7 @@ def toolbar() {
     }
     same_line()
     if (button(CENTER_FIRST, (text = "Center #1"))) {
-        center_node_on_screen(g_ed, 1)
+        center_node_on_screen(g_ed, 1)   // NB: MOVES node 1 to the view center - not a view op
     }
 }
 
