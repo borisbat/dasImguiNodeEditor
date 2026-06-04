@@ -72,8 +72,9 @@ selects it and focuses the canvas — then sends a real Ctrl chord:
 
    post_command(app, "imgui_key_chord", JV((mods = ["Ctrl"], key = "D")))
 
-``set_user_control(false)`` hands IO to the synthetic timeline so the real OS cursor can't
-race the synth and steal the canvas focus the chord needs. The headless regression
-(``test_clipboard_tutorial.das``) drives the same real chords — distinct from
-``test_shortcuts`` / ``test_clipboard``, which exercise ``shader_graph`` through the
-``ne_shortcut`` injection rail.
+The recording app holds ``set_user_control(false)`` for the whole run, so the real OS
+cursor can't race the synth and steal the canvas focus the chord needs. It also overlays
+the ``imgui_key_hud`` keycap strip, so each ``Ctrl`` chord is visible on screen as it
+fires. The headless regression (``test_clipboard_tutorial.das``) drives the same real
+chords — distinct from ``test_shortcuts`` / ``test_clipboard``, which exercise
+``shader_graph`` through the ``ne_shortcut`` injection rail.
