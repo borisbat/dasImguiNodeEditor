@@ -38,6 +38,11 @@ Walkthrough
 
 .. video:: delete_and_select.mp4
 
+The recording is voiced and self-verifying: it pulses both links with ``flow()``
+to show the chain is live, then a real synthetic click MUST select ``B`` and a
+real Delete key MUST remove ``B`` *and* cascade both links on its pins (a no-op
+aborts at teardown).
+
 .. literalinclude:: ../../../examples/tutorial/delete_and_select.das
    :language: das
    :linenos:
