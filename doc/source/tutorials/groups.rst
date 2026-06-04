@@ -4,9 +4,10 @@
 Groups
 ######
 
-A **group** (or comment box) is just a node with no pins and an explicit content size.
-Drag nodes over it and they move *with* the group — the editor handles the corral for
-free. It is the editor's tool for visually organizing a large graph.
+A **group** (or comment box) is a node with no pins and an explicit content size — the
+editor's tool for visually organizing a large graph. Membership is purely **spatial**:
+drag a node *inside* the group's bounds and it travels with the group from then on; drag
+it back *out* and the group leaves it behind. There is no "add to group" call.
 
 .. code-block:: das
 
@@ -26,6 +27,11 @@ Walkthrough
 
 .. video:: groups.mp4
 
+The recording is voiced and self-verifying: Texture starts inside the group, Tint outside.
+It drags Tint *in* (a group move then carries both nodes), then drags Tint back *out* (a
+group move then leaves it behind) — asserting at each step that the right nodes moved and,
+crucially, that the outside node stayed put (a no-op aborts at teardown).
+
 .. literalinclude:: ../../../examples/tutorial/groups.das
    :language: das
    :linenos:
@@ -37,6 +43,18 @@ A group is a node
 pin-less node whose body is its label. It shares the **same id space** as ``node(id)`` —
 keep the ids disjoint (the tutorial uses 1 for the group, 10 / 20 for the nodes). Draw
 groups **first** so the regular nodes paint on top of them.
+
+Membership is spatial
+=====================
+
+The editor decides what a group carries at the **moment you drag it**: it moves every node
+whose bounds fall inside the group's content box (``FindNodesInRect`` over ``m_GroupBounds``
+in the C++). There is no membership list and no join API — drop a node inside the bounds and
+the next group move takes it along; drag it back outside and the next move leaves it.
+
+To move the group itself, grab its **header** — the title strip *above* the content box.
+Pressing the content box instead starts a rubber-band selection (it moves nothing), which
+is why the recording aims its group-drag at the title.
 
 Editor-owned geometry
 =====================

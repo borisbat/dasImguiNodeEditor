@@ -39,9 +39,9 @@ let NODE_B   = 20
 def draw_editor() {
     node_editor("graph", (editor = g_ed)) {
         if (!g_seeded) {
-            imgui_node_editor::SetNodePosition(GROUP_ID, float2(60.0, 60.0))
-            imgui_node_editor::SetNodePosition(NODE_A, float2(110.0, 130.0))
-            imgui_node_editor::SetNodePosition(NODE_B, float2(110.0, 250.0))
+            imgui_node_editor::SetNodePosition(GROUP_ID, float2(60.0, 80.0))
+            imgui_node_editor::SetNodePosition(NODE_A, float2(130.0, 170.0))   // INSIDE the group
+            imgui_node_editor::SetNodePosition(NODE_B, float2(560.0, 200.0))   // OUTSIDE the group
             g_seeded = true
         }
         // The group, drawn first so the two nodes sit on top of it. `size` is the
@@ -56,7 +56,9 @@ def draw_editor() {
             let mn = imgui_node_editor::GetGroupMin()
             fg |> add_text(float2(mn.x + 4.0, mn.y - 18.0), rgba(232u, 226u, 210u, 255u), "Inputs")
         }
-        // Two ordinary nodes seeded inside the group. Drag the group and they follow.
+        // Two ordinary nodes: Texture starts INSIDE the group, Tint OUTSIDE. Membership is
+        // spatial - dragging the group carries whatever sits within its bounds at that moment
+        // (the editor's FindNodesInRect), so drag Tint in and it joins, drag it out and it leaves.
         node(NODE_A) {
             text("Texture")
             pin(11, (kind = PinKind.Output, pivot_alignment = float2(1.0, 0.5))) {
