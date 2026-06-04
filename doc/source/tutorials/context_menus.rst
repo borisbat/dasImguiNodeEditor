@@ -47,6 +47,12 @@ Walkthrough
 
 .. video:: context_menus.mp4
 
+The recording is voiced and self-verifying: it pulses the A→B link with ``flow()``
+to show it is live, then each synthetic right-click MUST open the matching menu —
+the node menu's *Delete node* MUST remove A and cascade its link, and the
+background menu's *Node* MUST spawn a node at the click point (a no-op aborts at
+teardown).
+
 .. literalinclude:: ../../../examples/tutorial/context_menus.das
    :language: das
    :linenos:
