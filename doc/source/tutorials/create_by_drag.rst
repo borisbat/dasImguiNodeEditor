@@ -45,6 +45,11 @@ Walkthrough
 
 .. video:: create_by_drag.mp4
 
+The recording is voiced and self-verifying: a real synthetic pin-drag released
+in empty canvas must open the create menu, and the menu pick must spawn the node
+and commit the auto-link (a no-op aborts at teardown). It closes by pulsing the
+freshly enqueued link with ``flow()`` to show the editor-made wire is live.
+
 .. literalinclude:: ../../../examples/tutorial/create_by_drag.das
    :language: das
    :linenos:
