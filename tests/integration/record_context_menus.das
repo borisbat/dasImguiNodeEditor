@@ -8,16 +8,13 @@ require imgui/imgui_editor_playwright public
 require daslib/json public
 require daslib/json_boost public
 
-//! Driver: record context_menus.apng — right-click a node for its "Delete node" menu
-//! (delete it, link cascades), then right-click the empty canvas for the background
-//! "Add a node" menu (create one at the cursor). Narrated, synthetic right-clicks.
-//! Run with `daslang tests/integration/record_context_menus.das`, then ffmpeg the
-//! .apng to .mp4.
-//!
-//! NB: set_user_control(false) hands IO fully to the synthetic timeline — without it
-//! the real OS cursor races the synth and consumes the menu clicks (a popup-close
-//! swallows the next right-click). The right-click must hit the node BODY (its center);
-//! a click on a pin opens the pin menu instead.
+//! Driver: record context_menus.apng - right-click a node for its "Delete node" menu
+//! (delete it, the link cascades), then right-click empty canvas for the background
+//! "Add a node" menu (create one at the cursor). Voiced and self-verifying: each
+//! right-click MUST open the matching menu, the delete MUST remove the node + cascade
+//! its link, and the create MUST spawn a node, or the recording aborts at teardown.
+//! Pulses the A -> B link first so the cascade reads as cutting a live connection.
+//! The headless regression for the same gestures is test_context_menus.das.
 
 let CANVAS = "MAIN_WIN/graph"
 
@@ -37,50 +34,68 @@ def right_click(app : ImguiApp; pt : tuple<float; float>) {
 [export]
 def main {
     with_node_editor_recording_app("examples/tutorial/context_menus.das",
-                                   "context_menus.apng", 55) $(app) {
-        var snap = wait_for_widget(app, "{CANVAS}/node_1", 15.0f)
-        if (snap == null) {
-            panic("{CANVAS}/node_1 never rendered — wrong app running?")
+                                   "context_menus.apng", 60) $(app) {
+        let T_A = "{CANVAS}/node_1"
+        let T_B = "{CANVAS}/node_2"
+        let T_LINK = "{CANVAS}/link_100"
+        let DEL_ITEM = "{CANVAS}/NODE_MENU/DEL_ITEM"
+        let ADD_ITEM = "{CANVAS}/BG_MENU/ADD_ITEM"
+        let NEW_NODE = "{CANVAS}/node_200"
+
+        let s = ne_open(app, CANVAS)
+        if (s.handle == uint64(0)) {
+            panic("{CANVAS} never rendered / no editor handle - wrong app running?")
         }
-        // Synthetic IO only — no real-cursor race (see header note).
-        post_command(app, "set_user_control", JV((enabled = false)))
+        var snap = wait_for_widget(app, T_A, 15.0f)
+        if (snap == null) {
+            panic("{T_A} never rendered - wrong app running?")
+        }
+        let cA = center(snap, T_A)
+        let bg_pt : tuple<float; float> = (720.0f, 430.0f)   // empty canvas
 
-        let del_item = "{CANVAS}/NODE_MENU/DEL_ITEM"
-        let add_item = "{CANVAS}/BG_MENU/ADD_ITEM"
-        let new_node = "{CANVAS}/node_200"
-        let cA = center(snap, "{CANVAS}/node_1")
-        let bg_pt : tuple<float; float> = (720.0, 430.0)   // empty canvas
+        // ---- Beat 1: the live link ----
+        record_check_rendered(app, T_A, true)
+        let dwell = say_begin(app, "A -> B: a live link", T_A,
+            [voice = "A and B share a live link - we can pulse it to see data flow before we touch the menus."])
+        var pulses = int(dwell) / 500
+        if (pulses < 4) { pulses = 4 }
+        let interval = dwell / uint(pulses)
+        for (_i in range(pulses)) {
+            ne_flow(s, 100)
+            sleep(interval)
+        }
 
-        // ---- node menu: right-click node A's body ----
-        say(app, "Right-click a node for its own context menu.", "{CANVAS}/node_1")
+        // ---- Beat 2: right-click A -> node menu ----
         move_to(app, cA, 700)
         wait_for_mouse_idle(app)
         right_click(app, cA)
-        var nodeMenuSnap = wait_for_widget(app, del_item, 6.0f)
-        print("node menu opened -> {nodeMenuSnap != null}\n")
-        say(app, "show_node_context_menu reports which node was hit; 'Delete node' enqueues it.", del_item)
-        click(app, del_item)
-        var goneSnap = wait_until_sec(app, 6.0f) $(var sn) {
-            return !widget_exists(sn, "{CANVAS}/node_1")
-        }
-        print("node A deleted via node menu -> {goneSnap != null}\n")
-        say(app, "Deleted through begin_delete - the link on its pin cascaded away too.", "{CANVAS}/node_2")
+        // Hard self-verify: the right-click MUST open the node menu.
+        record_check_rendered(app, DEL_ITEM, true)
+        say(app, "right-click a node -> its menu", DEL_ITEM,
+            [voice = "Right-click a node and the editor pops its own context menu - here it offers Delete node."])
 
-        // ---- background menu: right-click empty canvas ----
-        say(app, "Right-click empty canvas for the background menu.", "{CANVAS}/node_2")
+        // ---- Beat 3: Delete node -> A + link cascade ----
+        click(app, DEL_ITEM)
+        // Hard self-verify: A is gone AND its link cascaded out.
+        record_check_rendered(app, T_A, false)
+        record_check_rendered(app, T_LINK, false)
+        say(app, "Delete node -> A + link cascade", T_B,
+            [voice = "Delete node enqueues A through begin_delete - the same path the Delete key uses - so A and the link on its pin cascade away."])
+
+        // ---- Beat 4: right-click empty canvas -> background menu ----
         move_to(app, bg_pt, 700)
         wait_for_mouse_idle(app)
         right_click(app, bg_pt)
-        var bgSnap = wait_for_widget(app, add_item, 6.0f)
-        print("bg menu opened -> {bgSnap != null}\n")
-        say(app, "show_background_context_menu opens the menu at the cursor; 'Node' creates one here.", add_item)
-        click(app, add_item)
-        var nSnap = wait_for_widget(app, new_node, 5.0f)
-        print("node spawned via bg menu -> {nSnap != null}\n")
-        if (nSnap != null) {
-            say(app, "A new node, created at the click point.", new_node)
-        } else {
-            say(app, "(the menu pick did not land)", "{CANVAS}/node_2")
-        }
+        // Hard self-verify: the right-click MUST open the background menu.
+        record_check_rendered(app, ADD_ITEM, true)
+        say(app, "right-click empty -> background menu", ADD_ITEM,
+            [voice = "Right-click empty canvas instead and you get the background menu, opened right at the cursor."])
+
+        // ---- Beat 5: Node -> spawned at the click point ----
+        click(app, ADD_ITEM)
+        // Hard self-verify: the pick MUST spawn the node.
+        record_check_rendered(app, NEW_NODE, true)
+        say(app, "Node -> created at the click point", NEW_NODE,
+            [voice = "Picking Node creates a fresh node exactly where you clicked."])
     }
 }
