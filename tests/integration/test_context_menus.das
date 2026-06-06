@@ -48,7 +48,7 @@ def test_context_menus(t : T?) {
 
         // ---- node menu: right-click node A's body, pick "Delete node" ----
         right_click(d, node_center(snap, "{canvas}/node_1"))
-        var menuSnap = ne_wait_widget(s, "NODE_MENU/DEL_ITEM", 6.0f)
+        var menuSnap = ne_wait_visible(s, "NODE_MENU/DEL_ITEM", 6.0f)
         t |> success(menuSnap != null, "right-click on node opened its context menu")
         click(d, del_item)
         var gone = wait_until_sec(d, 6.0f) $(var sn) {
@@ -58,7 +58,7 @@ def test_context_menus(t : T?) {
 
         // ---- background menu: right-click empty canvas, pick "Node" ----
         right_click(d, (720.0, 430.0))
-        var bgSnap = ne_wait_widget(s, "BG_MENU/ADD_ITEM", 6.0f)
+        var bgSnap = ne_wait_visible(s, "BG_MENU/ADD_ITEM", 6.0f)
         t |> success(bgSnap != null, "right-click on empty canvas opened the background menu")
         click(d, add_item)
         var spawned = ne_wait_widget(s, "node_200", 6.0f)
