@@ -112,6 +112,13 @@ def public ne_wait_widget(s : EditorSession; subpath : string; timeout_sec : flo
     return wait_for_widget(s.app, "{s.canvas}/{subpath}", timeout_sec)
 }
 
+def public ne_wait_visible(s : EditorSession; subpath : string; timeout_sec : float = 6.0f) : JsonValue? {
+    //! Poll until `{canvas}/{subpath}` is present AND painted this frame. Use for re-showable
+    //! widgets (context-menu items, popups): existence-only (ne_wait_widget) can stale-pass on a
+    //! cached registry entry before the menu actually repaints.
+    return wait_for_visible(s.app, "{s.canvas}/{subpath}", timeout_sec)
+}
+
 def public ne_wait_selected(s : EditorSession; id : int; timeout_sec : float = 5.0f) : JsonValue? {
     //! Poll until node `id` is selected. Gate a selection-dependent chord (Ctrl+D / Ctrl+C) on
     //! the click's real effect, not a frame/time guess. Returns the snapshot, or null on timeout.

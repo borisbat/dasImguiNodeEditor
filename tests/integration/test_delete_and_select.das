@@ -37,6 +37,7 @@ def test_delete_and_select(t : T?) {
         var ev : array<JsonValue?>
         ev |> click_at(0, (title_x, title_y), 200, 0)
         post_command(d, "imgui_mouse_play", JV((events = ev)))
+        wait_for_mouse_idle(d)
         let selected = wait_until_sec(d, 6.0f) $(var sn) {
             return find_widget(sn, "{canvas}/node_2")?["payload"]?["selected"] ?? false
         }
@@ -46,6 +47,7 @@ def test_delete_and_select(t : T?) {
         let del = int(ImGuiKey.Delete)
         post_command(d, "imgui_key_press",   JV((key = del)))
         post_command(d, "imgui_key_release", JV((key = del)))
+        wait_for_key_idle(d, 4.0f)
         var gone = wait_until_sec(d, 6.0f) $(var sn) {
             return !widget_exists(sn, "{canvas}/node_2")
         }

@@ -324,9 +324,11 @@ def test_shader_graph(t : T?) {
             var ev : array<JsonValue?>
             ev |> click_at(0, (900.0, 450.0), 150, 1)
             post_command(d, "imgui_mouse_play", JV((events = ev)))
+            wait_for_mouse_idle(d)
 
-            // The right-click opens the popup → its menu_labels register.
-            var snapMenu = ne_wait_widget(s, "BG_CTX/CREATE_TEX", 6.0f)
+            // The right-click popup is re-showable — gate on actual paint, not stale registry
+            // existence (ne_wait_widget can pass on a cached menu entry from a prior open).
+            var snapMenu = ne_wait_visible(s, "BG_CTX/CREATE_TEX", 6.0f)
             t |> success(snapMenu != null, "right-click opened the Create-Node menu")
             if (snapMenu != null) {
                 t |> success(widget_exists(snapMenu, "{s.canvas}/BG_CTX/CREATE_ADD"),
@@ -356,8 +358,8 @@ def test_shader_graph(t : T?) {
             // Inject a drag-release from pin 8 (Multiply's output) dropped at canvas (600,450).
             ne_new_node_drag(s, 8, 600.0, 450.0)
 
-            // The release opens the Create+Connect menu → its items register at full path.
-            var snapMenu = ne_wait_widget(s, "BG_CTX/CREATE_ADD", 6.0f)
+            // The release opens the Create+Connect menu (re-showable popup) → gate on paint.
+            var snapMenu = ne_wait_visible(s, "BG_CTX/CREATE_ADD", 6.0f)
             t |> success(snapMenu != null, "drag-release opened the create-node menu")
             if (snapMenu != null) {
                 // Telemetry: the editor recorded the drag (source pin + drop point).
