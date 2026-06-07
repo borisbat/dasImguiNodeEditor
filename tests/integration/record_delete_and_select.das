@@ -61,7 +61,7 @@ def main {
         for (_i in range(pulses)) {
             ne_flow(s, 100)
             ne_flow(s, 101)
-            sleep(interval)
+            hold_content(app, interval)
         }
 
         // ---- Beat 3: select B (title-row click) ----
@@ -82,13 +82,13 @@ def main {
         let dwell2 = say_begin(app, "Delete -> B + both links cascade", "{CANVAS}/node_1",
             [voice = "Press Delete and the editor raises B through begin_delete; accepting it drops B and cascades the two links on its pins. A and C remain, disconnected."])
         let lead = dwell2 > 1200u ? 700u : dwell2 / 3u
-        sleep(lead)
+        hold_content(app, lead)
         post_command(app, "imgui_key_press", JV((key = del)))
         post_command(app, "imgui_key_release", JV((key = del)))
         // Hard self-verify: B is gone AND both links cascaded out, or abort at teardown.
         record_check_rendered(app, T_B, false)
         record_check_rendered(app, T_L100, false)
         record_check_rendered(app, T_L101, false)
-        sleep(dwell2 > lead ? dwell2 - lead : 0u)
+        hold_content(app, dwell2 > lead ? dwell2 - lead : 0u)
     }
 }

@@ -62,7 +62,7 @@ def main {
         let interval = dwell / uint(pulses)
         for (_i in range(pulses)) {
             ne_flow(s, 100)
-            sleep(interval)
+            hold_content(app, interval)
         }
 
         // ---- Beat 2: right-click A -> node menu ----
