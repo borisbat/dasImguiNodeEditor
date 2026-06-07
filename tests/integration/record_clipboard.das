@@ -37,10 +37,10 @@ def chord_under_voice(app : ImguiApp; dwell : uint; key : string) {
     // Fire the Ctrl chord partway into the already-posted voice line, so the keycap + Ctrl
     // pill pop while the line names it, then hold out the rest of the dwell.
     let lead = dwell > 1200u ? 700u : dwell / 3u
-    sleep(lead)
+    hold_content(app, lead)
     post_command(app, "imgui_key_chord", JV((mods = ["Ctrl"], key = key)))
     wait_for_key_idle(app, 4.0f)
-    sleep(dwell > lead ? dwell - lead : 0u)
+    hold_content(app, dwell > lead ? dwell - lead : 0u)
 }
 
 [export]
