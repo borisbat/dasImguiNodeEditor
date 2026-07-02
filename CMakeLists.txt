@@ -91,6 +91,12 @@ IF(COMMAND ADD_MODULE_CPP)
     # flavor comes from this module's own standalone build, and the twin would need
     # the dllexport/dllimport matrix against dasImgui for nothing a host ever loads
     ADD_DAS_STATIC_MODULE_LIB(libDasModuleImguiNodeEditor ${DAS_NODE_EDITOR_BIND_SRC} ${DAS_NODE_EDITOR_SRC})
+    # vendored upstream sources are not warning-clean under daslang's -Werror strict
+    # regime (ASCII-art multi-line comments, unused-but-set vars); suppress warnings
+    # on the vendored files only -- the binding sources stay strict
+    IF(NOT MSVC)
+        SET_SOURCE_FILES_PROPERTIES(${DAS_NODE_EDITOR_SRC} PROPERTIES COMPILE_OPTIONS "-w")
+    ENDIF()
     SET(_dasImguiNodeEditor_targets libDasModuleImguiNodeEditor)
     FOREACH(_t ${_dasImguiNodeEditor_targets})
         TARGET_INCLUDE_DIRECTORIES(${_t} PRIVATE
