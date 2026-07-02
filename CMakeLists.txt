@@ -1,12 +1,33 @@
-cmake_minimum_required(VERSION 3.16)
-project(dasImguiNodeEditor CXX C)
+# dasImguiNodeEditor builds two ways from a single CMakeLists:
+#  - included from a daslang superbuild (the ADD_MODULE_* macros exist): the module
+#    links statically into the host app via the convention path (dasImgui provides
+#    imgui headers + the libDasModuleImgui target) -- how an embedding app and the
+#    fat-man static-link example consume it.
+#  - configured directly (top-level project, DASLANG_DIR set): the standalone
+#    .shared_module build CI, the daspkg index, and -load_module consumers run on.
+IF(NOT COMMAND ADD_MODULE_CPP)
+    cmake_minimum_required(VERSION 3.16)
+    project(dasImguiNodeEditor CXX C)
+ENDIF()
 
-# DASLANG_DIR must point to the daslang SDK root
-if(NOT DEFINED DASLANG_DIR)
-    message(FATAL_ERROR "DASLANG_DIR must be set to the daslang SDK root")
-endif()
+IF((NOT DAS_IMGUI_NODE_EDITOR_INCLUDED) AND ((NOT ${DAS_IMGUI_NODE_EDITOR_DISABLED}) OR (NOT DEFINED DAS_IMGUI_NODE_EDITOR_DISABLED)))
+SET(DAS_IMGUI_NODE_EDITOR_INCLUDED TRUE)
+MESSAGE(STATUS "dasImguiNodeEditor module included.")
 
 SET(DAS_IMGUI_NODE_EDITOR_DIR ${CMAKE_CURRENT_LIST_DIR})
+
+IF(COMMAND ADD_MODULE_CPP)
+    # superbuild: dasImgui's CMakeLists (included earlier -- the modules glob is
+    # alphabetical) already set imgui_INCLUDE_DIR and created libDasModuleImgui
+    IF(NOT DEFINED imgui_INCLUDE_DIR)
+        MESSAGE(FATAL_ERROR "dasImguiNodeEditor superbuild: dasImgui must be included first (imgui_INCLUDE_DIR unset)")
+    ENDIF()
+    SET(DAS_IMGUI_DIR ${CMAKE_CURRENT_LIST_DIR}/../dasImgui)
+ELSE()
+    # DASLANG_DIR must point to the daslang SDK root
+    if(NOT DEFINED DASLANG_DIR)
+        message(FATAL_ERROR "DASLANG_DIR must be set to the daslang SDK root")
+    endif()
 
 # Locate dasImgui (sibling module under same modules/ parent)
 get_filename_component(MODULES_DIR "${DAS_IMGUI_NODE_EDITOR_DIR}" DIRECTORY)
@@ -29,6 +50,7 @@ if(WIN32)
         message(FATAL_ERROR "dasModuleImgui.lib not found at ${DAS_IMGUI_DIR}/. Build dasImgui first.")
     endif()
 endif()
+ENDIF()
 
 # imgui-node-editor (vendored, patched for imgui 1.90.6 compatibility)
 SET(NODE_EDITOR_INCLUDE_DIR ${DAS_IMGUI_NODE_EDITOR_DIR}/imgui-node-editor)
@@ -53,6 +75,41 @@ SET(DAS_NODE_EDITOR_BIND_SRC
     ${DAS_IMGUI_NODE_EDITOR_DIR}/src/dasIMGUI_NODE_EDITOR.func_6.cpp
 )
 
+
+IF(COMMAND ADD_MODULE_CPP)
+    # ===== daslang superbuild: static-embed =====
+    # `require imgui/<name>` -> modules/dasImguiNodeEditor/daslib/<name>.das; the glob IS the
+    # .das_module register_native_path list (file stem == module name throughout).
+    ADD_MODULE_CPP(dasIMGUI_NODE_EDITOR)
+    FILE(GLOB _dasImguiNodeEditor_das_files "${DAS_IMGUI_NODE_EDITOR_DIR}/daslib/*.das")
+    FOREACH(_f ${_dasImguiNodeEditor_das_files})
+        GET_FILENAME_COMPONENT(_n "${_f}" NAME_WE)
+        ADD_MODULE_DAS(imgui daslib ${_n})
+    ENDFOREACH()
+
+    IF(EMSCRIPTEN)
+        ADD_DAS_STATIC_MODULE_LIB(libDasModuleImguiNodeEditor ${DAS_NODE_EDITOR_BIND_SRC} ${DAS_NODE_EDITOR_SRC})
+        SET(_dasImguiNodeEditor_targets libDasModuleImguiNodeEditor)
+    ELSE()
+        ADD_MODULE_LIB(libDasModuleImguiNodeEditor dasModuleImguiNodeEditor ${DAS_NODE_EDITOR_BIND_SRC} ${DAS_NODE_EDITOR_SRC})
+        SET(_dasImguiNodeEditor_targets libDasModuleImguiNodeEditor dasModuleImguiNodeEditor)
+    ENDIF()
+    FOREACH(_t ${_dasImguiNodeEditor_targets})
+        TARGET_INCLUDE_DIRECTORIES(${_t} PRIVATE
+            ${imgui_INCLUDE_DIR}
+            ${NODE_EDITOR_INCLUDE_DIR}
+            ${DAS_IMGUI_DIR}/src
+            ${DAS_IMGUI_NODE_EDITOR_DIR}/src
+        )
+        TARGET_COMPILE_DEFINITIONS(${_t} PRIVATE IMGUI_DISABLE_OBSOLETE_FUNCTIONS=1)
+        SETUP_CPP11(${_t})
+    ENDFOREACH()
+    # imgui core symbols come from dasImgui's libs
+    TARGET_LINK_LIBRARIES(libDasModuleImguiNodeEditor PUBLIC libDasModuleImgui)
+    IF(NOT EMSCRIPTEN)
+        TARGET_LINK_LIBRARIES(dasModuleImguiNodeEditor PUBLIC dasModuleImgui)
+    ENDIF()
+ELSE()
 IF(WIN32)
     SET(NE_PUBLIC_ATTR "__declspec\(dllexport\)")
     SET(IMGUI_IMPORT_ATTR "__declspec\(dllimport\)")
@@ -124,3 +181,6 @@ set_target_properties(dasModuleImguiNodeEditor PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY_RELEASE "${DAS_IMGUI_NODE_EDITOR_DIR}"
     LIBRARY_OUTPUT_DIRECTORY "${DAS_IMGUI_NODE_EDITOR_DIR}"
 )
+ENDIF() # superbuild / standalone
+
+ENDIF() # DAS_IMGUI_NODE_EDITOR_INCLUDED guard
