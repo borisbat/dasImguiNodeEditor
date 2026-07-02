@@ -87,13 +87,11 @@ IF(COMMAND ADD_MODULE_CPP)
         ADD_MODULE_DAS(imgui daslib ${_n})
     ENDFOREACH()
 
-    IF(EMSCRIPTEN)
-        ADD_DAS_STATIC_MODULE_LIB(libDasModuleImguiNodeEditor ${DAS_NODE_EDITOR_BIND_SRC} ${DAS_NODE_EDITOR_SRC})
-        SET(_dasImguiNodeEditor_targets libDasModuleImguiNodeEditor)
-    ELSE()
-        ADD_MODULE_LIB(libDasModuleImguiNodeEditor dasModuleImguiNodeEditor ${DAS_NODE_EDITOR_BIND_SRC} ${DAS_NODE_EDITOR_SRC})
-        SET(_dasImguiNodeEditor_targets libDasModuleImguiNodeEditor dasModuleImguiNodeEditor)
-    ENDIF()
+    # static half only -- no ADD_MODULE_LIB shared twin: in a superbuild the DLL
+    # flavor comes from this module's own standalone build, and the twin would need
+    # the dllexport/dllimport matrix against dasImgui for nothing a host ever loads
+    ADD_DAS_STATIC_MODULE_LIB(libDasModuleImguiNodeEditor ${DAS_NODE_EDITOR_BIND_SRC} ${DAS_NODE_EDITOR_SRC})
+    SET(_dasImguiNodeEditor_targets libDasModuleImguiNodeEditor)
     FOREACH(_t ${_dasImguiNodeEditor_targets})
         TARGET_INCLUDE_DIRECTORIES(${_t} PRIVATE
             ${imgui_INCLUDE_DIR}
@@ -106,9 +104,6 @@ IF(COMMAND ADD_MODULE_CPP)
     ENDFOREACH()
     # imgui core symbols come from dasImgui's libs
     TARGET_LINK_LIBRARIES(libDasModuleImguiNodeEditor PUBLIC libDasModuleImgui)
-    IF(NOT EMSCRIPTEN)
-        TARGET_LINK_LIBRARIES(dasModuleImguiNodeEditor PUBLIC dasModuleImgui)
-    ENDIF()
 ELSE()
 IF(WIN32)
     SET(NE_PUBLIC_ATTR "__declspec\(dllexport\)")
