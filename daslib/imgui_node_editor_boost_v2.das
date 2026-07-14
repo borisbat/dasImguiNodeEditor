@@ -973,10 +973,7 @@ def get_selected_nodes(ctx : imgui_node_editor::EditorContext?) : array<NodeId> 
     if (count > 0) {
         var buf : array<void?>
         buf |> resize(count)
-        var n = 0
-        unsafe {
-            n = imgui_node_editor::GetSelectedNodes(reinterpret<NodeId?>(addr(buf[0])), count)
-        }
+        let n = imgui_node_editor::GetSelectedNodes(unsafe(addr<NodeId?>(buf[0])), count)
         result <- [for (i in range(n)); NodeId(intptr(buf[i]))]
         delete buf
     }
@@ -993,10 +990,7 @@ def get_selected_links(ctx : imgui_node_editor::EditorContext?) : array<LinkId> 
     if (count > 0) {
         var buf : array<void?>
         buf |> resize(count)
-        var n = 0
-        unsafe {
-            n = imgui_node_editor::GetSelectedLinks(reinterpret<LinkId?>(addr(buf[0])), count)
-        }
+        let n = imgui_node_editor::GetSelectedLinks(unsafe(addr<LinkId?>(buf[0])), count)
         result <- [for (i in range(n)); LinkId(intptr(buf[i]))]
         delete buf
     }
@@ -1015,10 +1009,7 @@ def get_ordered_node_ids(ctx : imgui_node_editor::EditorContext?) : array<NodeId
     if (count > 0) {
         var buf : array<void?>
         buf |> resize(count)
-        var n = 0
-        unsafe {
-            n = imgui_node_editor::GetOrderedNodeIds(reinterpret<NodeId?>(addr(buf[0])), count)
-        }
+        let n = imgui_node_editor::GetOrderedNodeIds(unsafe(addr<NodeId?>(buf[0])), count)
         result <- [for (i in range(n)); NodeId(intptr(buf[i]))]
         delete buf
     }
@@ -1281,10 +1272,7 @@ def get_action_context_nodes(ctx : imgui_node_editor::EditorContext?) : array<No
     if (count > 0) {
         var buf : array<void?>
         buf |> resize(count)
-        var n = 0
-        unsafe {
-            n = imgui_node_editor::GetActionContextNodes(reinterpret<NodeId?>(addr(buf[0])), count)
-        }
+        let n = imgui_node_editor::GetActionContextNodes(unsafe(addr<NodeId?>(buf[0])), count)
         result <- [for (i in range(n)); NodeId(intptr(buf[i]))]
         delete buf
     }
@@ -1302,10 +1290,7 @@ def get_action_context_links(ctx : imgui_node_editor::EditorContext?) : array<Li
     if (count > 0) {
         var buf : array<void?>
         buf |> resize(count)
-        var n = 0
-        unsafe {
-            n = imgui_node_editor::GetActionContextLinks(reinterpret<LinkId?>(addr(buf[0])), count)
-        }
+        let n = imgui_node_editor::GetActionContextLinks(unsafe(addr<LinkId?>(buf[0])), count)
         result <- [for (i in range(n)); LinkId(intptr(buf[i]))]
         delete buf
     }
