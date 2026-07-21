@@ -1,4 +1,5 @@
 options gen2
+options _comment_hygiene = true
 options indenting = 4
 options no_unused_block_arguments = false
 options no_unused_function_arguments = false
@@ -50,6 +51,7 @@ def main {
             [voice = "To connect two nodes you drag from an output pin to an input pin. begin_create opens the create scope."])
 
         // ---- Beat 2: the hero drag (proven committing timeline) ----
+
         // Press ON the output pin, travel the full distance with the button held, release
         // ON the input pin. Verbatim from test_connect_drag (drag_along presses ~10% into
         // the travel - off-pin for a small target - so the timeline is hand-built).

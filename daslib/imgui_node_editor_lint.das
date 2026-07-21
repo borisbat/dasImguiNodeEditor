@@ -1,4 +1,5 @@
 options gen2
+options _comment_hygiene = true
 options indenting = 4
 options strict_smart_pointers = true
 
@@ -74,9 +75,7 @@ class NodeEditorLintVisitor : AstVisitor {
     }
 
     def override preVisitExprCall(var expr : ExprCall?) : void {
-        // Combined skip: null guards, macro-generated function bodies, AND
-        // macro-synthesized call sites (qmacro ExprCalls whose `at` points at the
-        // macro template's file, not the user's) — mirrors imgui_lint.
+        // Also skips macro-synthesized call sites: their `at` points at the macro template's file, not the user's.
         if (expr.func == null || expr.func._module == null
                 || (current_function != null
                     && (current_function.flags.generated

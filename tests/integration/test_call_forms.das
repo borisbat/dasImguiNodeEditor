@@ -1,4 +1,5 @@
 options gen2
+options _comment_hygiene = true
 options indenting = 4
 options no_unused_block_arguments = false
 options no_unused_function_arguments = false
@@ -89,6 +90,7 @@ def test_call_forms(t : T?) {
             t |> success(near(c2x, 340.0f, 2.0f), "node_2 canvas_bbox.x ~= seeded 340 (got {c2x})")
 
             // ---- 3. bbox is a uniform affine image of canvas_bbox ----
+
             // Recover scale + offset from the two nodes and require BOTH map by the same
             // affine. This is translation-invariant — it holds whether or not the canvas has
             // a screen offset, so it never assumes a non-zero origin.
@@ -102,13 +104,13 @@ def test_call_forms(t : T?) {
             let off2 = b2x - c2x * scale
             t |> success(near(off1, off2, 1.0f),
                          "bbox maps canvas_bbox by a single affine (offset {off1} vs {off2})")
-            // Fixture-specific (NOT a general invariant): this windowed canvas sits inside a
-            // padded window, so its screen origin is non-zero and screen-space bbox is offset
-            // from canvas_bbox. A canvas pinned at screen (0,0) scale 1 would legitimately
-            // coincide — hence this is the only offset-assuming check, and it's scoped here.
+            // Fixture-specific, NOT a general invariant: this canvas sits in a padded window,
+            // so its screen origin is non-zero. A canvas pinned at (0,0) scale 1 would
+            // legitimately coincide — this is the only offset-assuming check.
             t |> success(off1 > 0.0f, "screen bbox carries the canvas screen origin ({off1})")
 
             // ---- 4. the canvas boundary itself (outside the transform) has NO canvas_bbox ----
+
             // node_editor() sets only the item-transform, never its own canvas_bbox; the @optional
             // float4 stays zero and JV drops it. A present canvas_bbox here would mean the transform
             // leaked past Begin/End.

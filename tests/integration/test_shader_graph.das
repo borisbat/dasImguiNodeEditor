@@ -1,4 +1,5 @@
 options gen2
+options _comment_hygiene = true
 options indenting = 4
 options no_unused_block_arguments = false
 options no_unused_function_arguments = false
@@ -273,12 +274,9 @@ def test_shader_graph(t : T?) {
             ne_shortcut(s, "copy")
             t |> success(ne_wait_shortcut(s, "copy") != null, "copy served")
 
-            // Paste — poll until link_20 is up and the two pasted nodes have committed their
-            // relative layout (~300px x / ~50px y apart, not stacked). Positions are seeded in-frame
-            // on first render, so they settle a frame or two after the paste shortcut; gating on the
-            // final geometry makes snapP != null itself the layout-preserved proof. An uncommitted
-            // node reads imgui-node-editor's un-laid-out sentinel (~INT_MIN), which the band rejects,
-            // so the poll only passes once BOTH nodes hold real, correctly-separated positions.
+            // Paste — poll until link_20 is up AND both pasted nodes hold real, separated
+            // positions (~300px x / ~50px y). Positions seed in-frame on first render, and an
+            // uncommitted node reads imgui-node-editor's un-laid-out sentinel (~INT_MIN).
             ne_shortcut(s, "paste")
             var snapP = wait_until_sec(d, 8.0f) $(var snap) {
                 if (!widget_exists(snap, "{s.canvas}/link_20")) return false

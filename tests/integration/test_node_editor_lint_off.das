@@ -1,4 +1,5 @@
 options gen2
+options _comment_hygiene = true
 options _allow_node_editor_native = true
 
 require imgui_node_editor

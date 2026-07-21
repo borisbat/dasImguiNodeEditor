@@ -1,4 +1,5 @@
 options gen2
+options _comment_hygiene = true
 
 // Driven fixture for the [widget]/[container] forward_argument CALL FORMS. Every
 // node-editor entity is rendered BOTH ways so tests/integration/test_call_forms.das
