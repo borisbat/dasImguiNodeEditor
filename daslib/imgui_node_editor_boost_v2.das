@@ -1,4 +1,5 @@
 options gen2
+options _comment_hygiene = true
 options indenting = 4
 options no_unused_block_arguments = false
 options no_unused_function_arguments = false
@@ -22,13 +23,9 @@ typedef LinkId = int
 typedef PinId = int
 typedef NodeId = int
 
-// Per-editor "last context menu" telemetry. The show_*_context_menu events record
-// the right-clicked target HERE (not in user-land); node_editor_payload surfaces it
-// in the snapshot, so the target the app is about to act on stays observable for
-// frames to come — independent of whatever the app chooses to render (popup, button,
-// nothing). Keyed by intptr(ctx). `kind` is the single source of truth for which
-// menu fired last ("" until any fires); each fire REPLACES the whole record, so the
-// other targets reset to their invalid (0 / default) values.
+// Per-editor "last context menu" telemetry: show_*_context_menu records the right-clicked
+// target HERE, and node_editor_payload surfaces it, so it stays observable for frames to come.
+// Keyed by intptr(ctx). Each fire REPLACES the record — other targets reset to 0 / default.
 struct private CtxMenuState {
     kind : string = ""        //! "" | "node" | "pin" | "link" | "background"
     node : NodeId = 0         //! right-clicked node id when kind=="node" (0 = none)
@@ -42,49 +39,35 @@ def private record_ctx_menu(ctx : imgui_node_editor::EditorContext?; var st : Ct
     g_ctx_menus[intptr(ctx)] = st
 }
 
-// Last "new node by drag" release per editor — the user dragged from a pin into
-// empty canvas and let go. show_new_node_drag records {from_pin, pos} here; it's
-// the create-flow peer of CtxMenuState (a drag-release is the same "gesture at a
-// point → app spawns" shape as the background context menu, plus a source pin to
-// auto-connect). Surfaced in node_editor_payload as last_new_node_drag_*.
+// Last "new node by drag" release per editor — the user dragged from a pin into empty canvas
+// and let go. show_new_node_drag records {from_pin, pos}; surfaced in node_editor_payload as
+// last_new_node_drag_*. Create-flow peer of CtxMenuState, plus a source pin to auto-connect.
 struct private NodeDragState {
     from_pin : PinId = 0               //! pin the drag started at (0 = none/never)
     pos      : float2 = float2(0.0, 0.0)   //! canvas-space drop point
 }
 var private g_node_drags : table<uint64; NodeDragState>
 
-// Last shortcut action per editor — which clipboard/edit shortcut the editor accepted
-// this frame (Ctrl+C/X/V/D, etc.). accept_* records it HERE (the events-record-telemetry
-// rule, same as CtxMenuState); surfaced in node_editor_payload as last_shortcut_*. Scalar
-// (copyable) — the action name + the size of its target set (= the selection the action
-// applies to; GetSelectedObjectCount, consistent for real + injected actions). The full
-// id lists are read via get_action_context_nodes/links (callable outside the frame).
+// Last shortcut action per editor (Ctrl+C/X/V/D, …) — accept_* records it HERE, surfaced as
+// last_shortcut_*. context_size is GetSelectedObjectCount (consistent for real AND injected
+// actions); the full id lists come from get_action_context_nodes/links, callable out-of-frame.
 struct private ShortcutState {
     action       : string = ""   //! "" | "cut" | "copy" | "paste" | "duplicate" | "create_node"
     context_size : int = 0       //! # objects (nodes + links) the action targets
 }
 var private g_shortcuts : table<uint64; ShortcutState>
 
-// Active editor for the currently-open node_editor() block, set for its duration
-// (stored as void? — it only flows into WidgetEntry.serialize_ctx). node/pin/link
-// stash it so their lazy snapshot serializers can SetCurrentEditor before querying
-// geometry/selection by id.
+// Active editor for the currently-open node_editor() block (void? — it only flows into
+// WidgetEntry.serialize_ctx). node/pin/link stash it so their lazy snapshot serializers can
+// SetCurrentEditor before querying geometry/selection by id.
 var private g_active_editor : void? = null
 var private g_active_handle : uint64 = 0ul     // intptr of the editor whose node_editor block is open (0 = none)
 
 // ===== duplicate-id tracker (on by default) =====
-//
-// node/pin/link ids are unique PER KIND per editor: BeginNode/BeginPin/Link do a
-// find-or-create on the id (FindObject is tag-discriminated, so a node and a pin may
-// share a value, but two pins may not). Two same-kind entities with the same id
-// silently MERGE into one editor object — the native CreatePin uniqueness assert is
-// debug-only and compiled out in Release. The merged object takes the last layout, so
-// e.g. a link routes to the wrong pin with no error or crash. A duplicate id is a broken
-// graph, so this tracker fails fast: per editor, per frame, each id is checked against the
-// ones already seen this frame and a duplicate PANICS (fatal, compiled in for Release too).
-// ON by default; set_node_editor_id_tracking(false) drops the per-entity set lookup+insert
-// where the ids are known-unique and the cost matters. node + node_group share the "nodes"
-// set (a group IS a node).
+
+// ids are unique PER KIND per editor: FindObject is tag-discriminated, so a node and a pin may
+// share a value but two pins may not. Same-kind duplicates silently MERGE into one editor object
+// (the native assert is Release-compiled-out). node + node_group share the "nodes" set.
 
 struct private IdSeen {
     nodes : table<int>      //! node() + node_group() ids (one node space)
@@ -95,30 +78,21 @@ var private g_id_seen : table<uint64; IdSeen>   // keyed by editor handle (intpt
 var private g_track_ids : bool = true
 
 def set_node_editor_id_tracking(on : bool) {
-    //! Toggle the per-frame duplicate-id check. node/pin/link ids must be unique per kind
-    //! within an editor; a collision silently merges two entities into one editor object
-    //! (the native uniqueness assert is compiled out in Release), so links route to the
-    //! wrong pin with no error. With the check ON (the default) a duplicate PANICS (fatal,
-    //! compiled in for Release too) — a broken graph should fail fast, not limp on. Turn it off
-    //! to drop the per-entity set lookup+insert in hot draw loops with known-unique ids.
+    //! Toggle the per-frame duplicate-id check. A collision silently merges two entities into
+    //! one editor object, so a link routes to the wrong pin with no error; with the check ON
+    //! (default) a duplicate PANICS. Turn it off in hot draw loops with known-unique ids.
     g_track_ids = on
 }
 
 def private reset_id_seen(handle : uint64) {
-    // Clear the frame's seen-sets for this editor (auto-inserts an empty IdSeen on first
-    // use). Separate statements: one table lookup each, never two on g_id_seen per expr.
+    // Separate statements: one table lookup each — never two on g_id_seen in one expression.
     g_id_seen[handle].nodes |> clear()
     g_id_seen[handle].pins |> clear()
     g_id_seen[handle].links |> clear()
 }
 
 def private track_id(var seen : table<int>; id : int; kind : string) {
-    // A duplicate id is a broken graph: the native editor would silently merge the two
-    // same-id kinds into one object (its own uniqueness assert is compiled out in Release),
-    // misrouting links with no error. That's a program bug, so fail fast — panic is fatal and
-    // always compiled in, so this stops with diagnostics instead of letting the merge slip
-    // through. (panic, not verify, because the message interpolates kind/id — verify needs a
-    // constant message.)
+    // panic, not verify: the message interpolates kind/id, and verify needs a constant message.
     if (key_exists(seen, id)) {
         panic("dasImguiNodeEditor: duplicate {kind} id {id} in one editor — {kind} ids must be unique per editor; same-id {kind}s silently merge into one object. Fix the id, or call set_node_editor_id_tracking(false) to disable this check.")
     }
@@ -126,19 +100,15 @@ def private track_id(var seen : table<int>; id : int; kind : string) {
 }
 
 // ===== editor canvas (app-owned context) =====
-//
-// The EditorContext is the editor's handle and the APP owns it — create N of
-// them (one per graph window), pass the ctx to every boost entry point. No
-// module singleton. `intptr(ctx)` (uint64) is the stable unique id used to
-// target an editor across the live/JSON boundary (see handle_to_editor).
+
+// The APP owns the EditorContext — create N of them (one per graph window) and pass the ctx to
+// every boost entry point; no module singleton. `intptr(ctx)` (uint64) is the stable unique id
+// that targets an editor across the live/JSON boundary (see handle_to_editor).
 
 def create_node_editor() : imgui_node_editor::EditorContext? {
-    //! Create an editor context with NodeEditor.json persistence disabled (custom
-    //! binding — Config.SettingsFile is const in the generated bind). The app owns
-    //! the handle: pass it to node_editor()/set_node_position(), free it with
-    //! destroy_node_editor(). An app may own several (one per graph). Clipboard/edit
-    //! shortcuts (Ctrl+C/X/V/D) are ENABLED by default — consume them via with_shortcuts;
-    //! call enable_shortcuts(ctx, false) to opt out.
+    //! Create an editor context with NodeEditor.json persistence disabled (custom binding —
+    //! Config.SettingsFile is const in the generated bind). The app owns the handle; free it
+    //! with destroy_node_editor(). Ctrl+C/X/V/D are ENABLED by default — see with_shortcuts.
     var ctx = imgui_node_editor::CreateEditorNoSettings()
     enable_shortcuts(ctx, true)
     return ctx
@@ -163,23 +133,17 @@ def destroy_node_editor(ctx : imgui_node_editor::EditorContext?) {
 }
 
 def handle_to_editor(handle : uint64) : imgui_node_editor::EditorContext? {
-    //! Resolve a live-command editor handle (= intptr(ctx), exposed in the
-    //! node_editor snapshot payload) back to its context. Unsafe by nature: the
-    //! handle is a raw pointer value from JSON, so it must originate from a
-    //! snapshot of a live editor.
+    //! Resolve a live-command editor handle (= intptr(ctx), exposed in the node_editor
+    //! snapshot payload) back to its context. Unsafe by nature: the handle is a raw pointer
+    //! value from JSON, so it must originate from a snapshot of a live editor.
     return unsafe(reinterpret<imgui_node_editor::EditorContext?>(handle))
 }
 
 [container(forward_argument=true, verbatim_path=true)]
 def node_editor(editor : imgui_node_editor::EditorContext?; size : float2 = float2(0.0, 0.0); blk : block) {
-    //! The canvas for ONE graph — `node_editor("name", (editor = ctx, size = float2(0,0))){…}`.
-    //! arg0 is the verbatim path key (the canvas name); `editor` is the app-owned
-    //! EditorContext. Brackets SetCurrentEditor + Begin/End. Registers as kind
-    //! "node_editor" with payload {handle: intptr(editor)} built lazily at snapshot
-    //! (node_editor_payload) — `handle` is the unique id the live API targets; no
-    //! per-frame JSON. `widget_ident` (= the name) is macro-injected;
-    //! child nodes/pins/links nest under it. (Macro injects widget_prelude +
-    //! container_path_push/pop.)
+    //! The canvas for ONE graph — `node_editor("name", (editor = ctx)){…}`. arg0 is the
+    //! verbatim path key; `editor` is the app-owned context. Brackets SetCurrentEditor +
+    //! Begin/End; payload {handle: intptr(editor)} is built lazily — no per-frame JSON.
     imgui_node_editor::SetCurrentEditor(editor)
     g_active_editor = unsafe(reinterpret<void?>(editor))
     g_active_handle = intptr(editor)
@@ -187,12 +151,9 @@ def node_editor(editor : imgui_node_editor::EditorContext?; size : float2 = floa
         reset_id_seen(g_active_handle)   // start this editor's frame with empty seen-sets
     }
     imgui_node_editor::Begin(widget_ident, size)
-    // Tell the snapshot capture how to map this canvas's local item rects to screen,
-    // so interior widgets (node titles, pin labels, drawlist art) report screen-space
-    // `bbox` + a `canvas_bbox`. The canvas remaps ImGui to local space between Begin/End,
-    // so GetItemRectMin (which widget_finalize captures) is canvas-local in here.
-    // CanvasToScreen is the absolute local→screen affine, so this push/pop nests if one
-    // node_editor is ever drawn inside another.
+    // The canvas remaps ImGui to local space between Begin/End, so the GetItemRectMin that
+    // widget_finalize captures is canvas-local. Push the local→screen affine so interior widgets
+    // report screen `bbox` + `canvas_bbox`; CanvasToScreen is absolute, so this push/pop nests.
     let xo  = imgui_node_editor::CanvasToScreen(float2(0.0, 0.0))
     let xux = imgui_node_editor::CanvasToScreen(float2(1.0, 0.0))
     let xuy = imgui_node_editor::CanvasToScreen(float2(0.0, 1.0))
@@ -228,9 +189,8 @@ def set_node_position(ctx : imgui_node_editor::EditorContext?; id : NodeId; pos 
 
 def get_node_position(ctx : imgui_node_editor::EditorContext?; id : NodeId) : float2 {
     //! Read a node's editor-owned canvas position from OUTSIDE the draw loop (brackets
-    //! SetCurrentEditor). The geometry read peer of set_node_position — use it to capture
-    //! a layout (e.g. a clipboard copy that preserves relative positions). float2(0,0) for
-    //! a null ctx.
+    //! SetCurrentEditor). Geometry-read peer of set_node_position — use it to capture a
+    //! layout, e.g. a clipboard copy that preserves relative positions. float2(0,0) if null.
     return float2(0.0, 0.0) if (ctx == null)
     imgui_node_editor::SetCurrentEditor(ctx)
     let pos = imgui_node_editor::GetNodePosition(id)
@@ -240,11 +200,9 @@ def get_node_position(ctx : imgui_node_editor::EditorContext?; id : NodeId) : fl
 
 def flow(ctx : imgui_node_editor::EditorContext?; link_id : LinkId;
          dir : imgui_node_editor::FlowDirection = imgui_node_editor::FlowDirection.Forward) : bool {
-    //! Trigger a one-shot "data flow" pulse along link_id — a marker that travels the
-    //! link and fades over style.FlowDuration. Imperative editor action (NOT a link
-    //! property): re-call to re-pulse, or call every frame for continuous flow. Brackets
-    //! SetCurrentEditor so it works from outside the draw loop (live command, post-block).
-    //! No-op for a null ctx; a stale/deleted link_id is a safe no-op (editor FindLink-guards).
+    //! Trigger a one-shot "data flow" pulse along link_id, fading over style.FlowDuration.
+    //! Imperative action, NOT a link property: re-call to re-pulse, or call every frame for
+    //! continuous flow. Brackets SetCurrentEditor. Null ctx / stale link_id are safe no-ops.
     return false if (ctx == null)
     imgui_node_editor::SetCurrentEditor(ctx)
     imgui_node_editor::Flow(link_id, dir)
@@ -253,18 +211,15 @@ def flow(ctx : imgui_node_editor::EditorContext?; link_id : LinkId;
 }
 
 // ===== node ops + view navigation (transient; bracket SetCurrentEditor) =====
-//
-// Imperative editor actions with no observable state after they run (like flow) —
-// they move the viewport or a node's z-order, not graph topology. All bracket
-// SetCurrentEditor so they work from outside the draw loop (toolbar button, live
-// command). NavigateToContent stays a raw allow-listed call (the app owns the
-// SCALE_TO_MONITOR/DPI workaround — see shader_graph.das).
+
+// Imperative actions with no observable state after they run (like flow) — they move the
+// viewport or a node's z-order, not graph topology. NavigateToContent stays a raw allow-listed
+// call: the app owns the SCALE_TO_MONITOR/DPI workaround (see shader_graph.das).
 
 def center_node_on_screen(ctx : imgui_node_editor::EditorContext?; id : NodeId) : bool {
-    //! MOVES node `id` to the center of the current view - despite the name, upstream
-    //! CenterNodeOnScreen translates the node's bounds (and marks a user position change);
-    //! it does NOT pan the view. Use it to recall a stray node, not to navigate. No-op for
-    //! a null ctx. (NavigateToContent / navigate_to_selection are the view-only ops.)
+    //! MOVES node `id` to the center of the current view — despite the name, upstream
+    //! CenterNodeOnScreen translates the node's bounds and marks a user position change; it
+    //! does NOT pan the view. NavigateToContent / navigate_to_selection are the view-only ops.
     return false if (ctx == null)
     imgui_node_editor::SetCurrentEditor(ctx)
     imgui_node_editor::CenterNodeOnScreen(id)
@@ -316,40 +271,26 @@ def set_group_size(ctx : imgui_node_editor::EditorContext?; id : NodeId; size : 
 }
 
 // ===== graph entities (node / pin / link) — id-keyed via forward_argument =====
-//
-// Each takes the editor's int id as the first arg, forwarded through the
-// [widget]/[container] macros' `forward_argument` mode: the macro injects
-// widget_prelude + (for containers) container_path_push/pop and a runtime path
-// key "{kind}_{id}". The editor owns the entity (no app-side state struct), so
-// rather than build a JsonValue per frame the body sets a lazy `serialize` hook
-// on the entry (editor handle + id); the payload is reconstructed only when a
-// snapshot is requested (widget_entry_jv), by querying the editor. node/pin are
-// containers (children nest under them); link is a leaf.
+
+// Each takes the editor's int id as arg0, forwarded through the [widget]/[container] macros'
+// `forward_argument` mode, which yields a runtime path key "{kind}_{id}". The editor owns the
+// entity, so the body sets a lazy `serialize` hook instead of building a JsonValue per frame.
 
 def private finalize_entity(widget_ident : string; kind : string; var entry : WidgetEntry) {
-    //! Container finalize for a per-frame entry with a pre-built payload — null
-    //! (addr, ti) so the snapshot uses entry.payload verbatim. Keys off the
-    //! container chain (self already pushed by the macro prelude).
+    // null (addr, ti) makes the snapshot use entry.payload verbatim; the macro prelude already pushed self.
     container_finalize(widget_ident, kind, entry, null, null)
 }
 
 def private finalize_entity_leaf(widget_ident : string; kind : string; var entry : WidgetEntry) {
-    //! Leaf (childless) finalize — widget_finalize keys off widget_path_key
-    //! (container chain + ident), so a leaf needs no self-push. (container_finalize
-    //! would key off the bare chain and collide with the parent's entry.)
+    // Leaf: widget_finalize keys off widget_path_key, so no self-push — container_finalize would collide with the parent's entry.
     widget_finalize(widget_ident, kind, entry, null, null)
 }
 
-// Lazy payload serializers (no-capture). Invoked only at snapshot time via the
-// WidgetEntry.serialize hook, never per frame. They re-derive everything from
-// (editor handle, id) — the editor is the source of truth for geometry,
-// selection and link topology, so nothing is stored per frame. Each brackets
-// SetCurrentEditor since the context isn't current outside the node_editor block
-// (same pattern as set_node_position).
+// Lazy payload serializers (no-capture), invoked only at snapshot time via the
+// WidgetEntry.serialize hook — never per frame. They re-derive from (editor handle, id), and
+// each brackets SetCurrentEditor: the context is not current outside the node_editor block.
 def private node_editor_payload(ctx : void?; _id : int) : JsonValue? {
-    // The canvas exposes the app-owned editor handle (= intptr(editor)) the live API
-    // targets, plus the last context-menu target (recorded by show_*_context_menu) so
-    // it's observable across frames. No editor query needed — both are module state.
+    // No editor query needed — the handle and every last_* target are module state.
     let h = intptr(ctx)
     var cm = CtxMenuState()
     if (key_exists(g_ctx_menus, h)) {
@@ -384,8 +325,7 @@ def private node_payload(ctx : void?; id : int) : JsonValue? {
     let sz = imgui_node_editor::GetNodeSize(id)
     let sel = imgui_node_editor::IsNodeSelected(id)
     let z = imgui_node_editor::GetNodeZPosition(id)
-    // Map the editor-owned canvas geometry to screen (the snapshot is uniformly
-    // screen-space); keep the canvas rect alongside as canvas_bbox.
+    // The snapshot is uniformly screen-space; canvas_bbox keeps the editor-owned canvas rect.
     let smin = imgui_node_editor::CanvasToScreen(pos)
     let smax = imgui_node_editor::CanvasToScreen(pos + sz)
     imgui_node_editor::SetCurrentEditor(null)
@@ -413,16 +353,9 @@ def private link_payload(ctx : void?; id : int) : JsonValue? {
 
 [container(forward_argument=true)]
 def node(id : NodeId; color : float4 = float4(-1.0, -1.0, -1.0, -1.0); blk : block) {
-    //! A graph node — `node(id, (color = …)){…}`. `id` is the editor's node handle.
-    //! `color` tints the node body via PushStyleColor(StyleColor.NodeBg); pass a
-    //! negative color (e.g. float4(-1,-1,-1,-1)) to keep the editor default.
-    //! Registers as kind "node"; payload {id, bbox, canvas_bbox, selected, z} is built
-    //! lazily at snapshot (node_payload) by querying the editor — the editor owns node
-    //! geometry, not ImGui's item rect. `bbox` is screen-space (for click-targeting /
-    //! visual aids, uniform with all other widgets); `canvas_bbox` carries the editor
-    //! canvas-space rect. entry.bbox/entry.canvas_bbox are also set per frame. Child
-    //! pins/text nest under this node's path. `widget_ident` is macro-injected
-    //! (= "node_{id}").
+    //! A graph node — `node(id, (color = …)){…}`. `color` tints the body via
+    //! PushStyleColor(StyleColor.NodeBg); a NEGATIVE color keeps the editor default. Geometry
+    //! comes from the EDITOR, not ImGui's item rect: `bbox` screen-space, `canvas_bbox` canvas.
     if (g_track_ids && g_active_handle != 0ul) {
         track_id(g_id_seen[g_active_handle].nodes, id, "node")
     }
@@ -451,16 +384,9 @@ def node(id : NodeId; color : float4 = float4(-1.0, -1.0, -1.0, -1.0); blk : blo
 
 [container(forward_argument=true)]
 def node_group(id : NodeId; size : float2 = float2(200.0, 150.0); blk : block) {
-    //! A group / comment node — `node_group(id, (size = float2(w,h))){…}`. A group IS a
-    //! node: the body renders FIRST (its title becomes the header), then Group(size) lays
-    //! the resizable box below it, so child nodes dragged onto it move with it. `size` is a
-    //! ONE-TIME seed (like node position) — once the node is a group the editor owns its
-    //! bounds and ignores the passed size on later frames; use set_group_size to resize.
-    //! Named node_group (not group) to avoid colliding with imgui's BeginGroup/EndGroup
-    //! `group` container. Registers as kind "node_group"; payload {id, bbox, canvas_bbox,
-    //! selected, z} is built lazily via node_payload (a group is geometrically a node) —
-    //! `bbox` screen-space, `canvas_bbox` the editor canvas-space rect. `widget_ident`
-    //! is macro-injected (= "node_group_{id}").
+    //! A group / comment node — a group IS a node. The body renders FIRST (its title becomes
+    //! the header), THEN Group(size) lays the resizable box below it. `size` is a ONE-TIME seed:
+    //! the editor then owns the bounds — use set_group_size. Named to avoid imgui's `group`.
     if (g_track_ids && g_active_handle != 0ul) {
         track_id(g_id_seen[g_active_handle].nodes, id, "node")   // a group shares the node id space
     }
@@ -486,13 +412,9 @@ def pin(id : PinId; kind : PinKind;
         pivot_alignment : float2 = float2(-1.0, -1.0);
         pivot_size : float2 = float2(-1.0, -1.0);
         pivot_scale : float2 = float2(-1.0, -1.0); blk : block) {
-    //! A node pin — `pin(id, kind){…}`, or with geometry config via the tuple form
-    //! `pin(id, (kind = PinKind.Output, pivot_alignment = float2(1.0, 0.5)))`. `kind`
-    //! drives BeginPin. pivot_alignment (0..1 within the pin rect), pivot_size and
-    //! pivot_scale place + size the link-attach point — e.g. align an output pin's pivot
-    //! to its right edge so links leave the node cleanly; a negative x (the -1 default on
-    //! each) keeps the editor default for that axis. Registers as kind "pin"; payload {id}
-    //! is built lazily (pin_payload). `widget_ident` is macro-injected (= "pin_{id}").
+    //! A node pin — `pin(id, kind){…}`, or `pin(id, (kind = PinKind.Output, pivot_alignment =
+    //! float2(1.0, 0.5)))`. pivot_alignment (0..1 within the pin rect), pivot_size and pivot_scale
+    //! place + size the LINK-ATTACH point; a negative x keeps the editor default for that axis.
     if (g_track_ids && g_active_handle != 0ul) {
         track_id(g_id_seen[g_active_handle].pins, id, "pin")
     }
@@ -526,12 +448,9 @@ def pin(id : PinId; kind : PinKind;
 [widget(forward_argument=true)]
 def link(id : LinkId; from : PinId; to : PinId;
          color : float4 = float4(1.0, 1.0, 1.0, 1.0); thickness : float = 1.0) {
-    //! A graph edge — `link(id, (from=…, to=…))`. Leaf (no body); the editor draws
-    //! the curve. Registers as kind "link"; payload {id, from_pin, to_pin, selected}
-    //! is built lazily at snapshot (link_payload) via GetLinkPins/IsLinkSelected.
-    //! Color/thickness defaulted (the generated bind doesn't surface the C++
-    //! defaults) and overridable via the tuple. `widget_ident` is macro-injected
-    //! (= "link_{id}").
+    //! A graph edge — `link(id, (from=…, to=…))`. Leaf (no body); the editor draws the curve.
+    //! Payload {id, from_pin, to_pin, selected} is built lazily via GetLinkPins/IsLinkSelected.
+    //! Color/thickness are defaulted here because the generated bind omits the C++ defaults.
     if (g_track_ids && g_active_handle != 0ul) {
         track_id(g_id_seen[g_active_handle].links, id, "link")
     }
@@ -567,26 +486,18 @@ def with_style_var(style_var : imgui_node_editor::StyleVar; value : float4; blk 
 }
 
 def with_style_color(style_color : imgui_node_editor::StyleColor; color : float4; blk : block) {
-    //! Bracket PushStyleColor/PopStyleColor(1) around the body for a node-editor style
-    //! color (e.g. StyleColor.NodeBorder, StyleColor.HovNodeBorder, StyleColor.Flow) —
-    //! the color peer of with_style_var. Scopes a per-node/per-region override on top of
-    //! the editor's ed::Style (see imgui_node_editor_theme_daslang). node()'s `color` arg
-    //! already covers NodeBg; reach for this for the other slots. Pure rendering config —
-    //! no snapshot state.
+    //! Bracket PushStyleColor/PopStyleColor(1) for a node-editor style color — the color peer
+    //! of with_style_var. Scopes a per-node/per-region override on top of the editor's ed::Style
+    //! (see imgui_node_editor_theme_daslang). node()'s `color` arg already covers NodeBg.
     imgui_node_editor::PushStyleColor(style_color, color)
     invoke(blk)
     imgui_node_editor::PopStyleColor(1)
 }
 
 def group_hint(id : NodeId; blk : block<(var fg : ImDrawList?; var bg : ImDrawList?) : void>) : bool {
-    //! Draw an off-screen group-label overlay for group node `id`. The editor only renders
-    //! hints when the canvas is zoomed out (view scale <= 0.75) AND `id` is a group, so
-    //! this returns false (block NOT invoked) otherwise — call it unconditionally per
-    //! group each frame and it self-gates. The block receives the hint foreground +
-    //! background draw lists (feed them add_text / add_rect_filled); position art via
-    //! GetGroupMin()/GetGroupMax(). Must run INSIDE the node_editor() block and NOT inside
-    //! with_suspended (BeginGroupHint suspends/resumes the editor internally). Decorative —
-    //! no snapshot state.
+    //! Off-screen group-label overlay for group node `id`. Self-gating: renders only when the
+    //! canvas is zoomed out (scale <= 0.75) AND `id` is a group, else returns false with the
+    //! block NOT invoked. Must run INSIDE node_editor() and NOT inside with_suspended.
     return false if (!imgui_node_editor::BeginGroupHint(id))
     var fg = imgui_node_editor::GetHintForegroundDrawList()
     var bg = imgui_node_editor::GetHintBackgroundDrawList()
@@ -596,23 +507,18 @@ def group_hint(id : NodeId; blk : block<(var fg : ImDrawList?; var bg : ImDrawLi
 }
 
 def with_node_background_drawlist(id : NodeId; blk : block<(var dl : ImDrawList?) : void>) {
-    //! Hand the body node `id`'s background draw list to paint custom art BEHIND the node
-    //! (mirrors dasImgui's with_*_drawlist). Feed `dl` to the imgui drawlist primitives
-    //! (add_rect_filled, add_line, …). Call it AFTER the node()/group() block (the node
-    //! must be fully built — its draw channels only exist post-EndNode; calling mid-body
-    //! crashes), still inside the node_editor() block. Decorative — no snapshot state.
+    //! Hand the body node `id`'s background draw list to paint custom art BEHIND the node.
+    //! Call it AFTER the node()/node_group() block — the node's draw channels only exist
+    //! post-EndNode and calling mid-body CRASHES — but still inside the node_editor() block.
     var dl = imgui_node_editor::GetNodeBackgroundDrawList(id)
     invoke(blk, dl)
 }
 
 // ===== link creation (queue-injectable; drivable via live) =====
-//
-// begin_create / query_new_link / accept_new_item mirror imgui-node-editor's
-// BeginCreate/QueryNewLink/AcceptNewItem, but each also serves a link queued by
-// enqueue_new_link: the next frame replays the queued link through the SAME app
-// create handler the mouse drives, so topology stays app-owned and bidirectional.
-// has_pending(h) holds across begin->query->accept within a frame (we pop only on
-// accept), so the three wrappers just test it; a queued link wins over a live drag.
+
+// The wrappers mirror BeginCreate/QueryNewLink/AcceptNewItem, but each also serves a link queued
+// by enqueue_new_link, replaying it through the SAME app create handler the mouse drives.
+// has_pending holds across begin->query->accept (we pop only on accept); a queue beats a drag.
 
 struct private PendingLink {
     editor : uint64
@@ -646,10 +552,9 @@ def private pop_pending(h : uint64) {
 }
 
 def enqueue_new_link(ctx : imgui_node_editor::EditorContext?; from : PinId; to : PinId) : bool {
-    //! Queue a link (from_pin -> to_pin) to be created in `ctx` on its next frame.
-    //! The create wrappers replay it through the app's own create handler, so the
-    //! app writes its graph exactly as for a mouse-dragged link. Returns false for
-    //! a null ctx or a 0 pin id (0 is the editor's "no pin" sentinel).
+    //! Queue a link (from_pin -> to_pin) to be created in `ctx` on its next frame — replayed
+    //! through the app's own create handler, so the app writes its graph exactly as for a
+    //! mouse-dragged link. False for a null ctx or a 0 pin id (0 is the "no pin" sentinel).
     return false if (ctx == null || from == 0 || to == 0)
     g_pending_links |> push(PendingLink(editor = intptr(ctx), from = from, to = to))
     return true
@@ -685,22 +590,18 @@ def private has_pending_node_drag(h : uint64) : bool {
 }
 
 def enqueue_new_node_drag(ctx : imgui_node_editor::EditorContext?; from_pin : PinId; pos : float2) : bool {
-    //! Queue a synthetic "new node by drag" release for `ctx` — the source pin the
-    //! drag began at + the canvas-space drop point. show_new_node_drag serves it on
-    //! the next frame exactly as a real release, firing the app's create-node flow.
-    //! The drivable/testable twin of dragging from a pin into empty canvas (pin
-    //! geometry isn't queryable, so a real drag can't be synth-targeted). Returns
-    //! false for a null ctx or 0 source pin.
+    //! Queue a synthetic "new node by drag" release for `ctx` — the source pin + canvas-space
+    //! drop point; show_new_node_drag serves it next frame exactly as a real release. This rail
+    //! exists because pin geometry isn't queryable, so a real drag can't be synth-targeted.
     return false if (ctx == null || from_pin == 0)
     g_pending_node_drags |> push(PendingNodeDrag(editor = intptr(ctx), from_pin = from_pin, pos = pos))
     return true
 }
 
 def begin_create(ctx : imgui_node_editor::EditorContext?; blk : block) {
-    //! Bracket BeginCreate/EndCreate for `ctx` (drag-preview link drawn white, 1px).
-    //! Invokes the body when the user is dragging a new link/node OR a queued link
-    //! or node-drag is pending. Inside, call query_new_link + accept_new_item and/or
-    //! show_new_node_drag — they transparently serve the queued item when injecting.
+    //! Bracket BeginCreate/EndCreate for `ctx` (drag-preview link drawn white, 1px). Invokes
+    //! the body when the user is dragging a new link/node OR a queued link or node-drag is
+    //! pending. Inside: query_new_link + accept_new_item and/or show_new_node_drag.
     let native = imgui_node_editor::BeginCreate(float4(1.0, 1.0, 1.0, 1.0), 1.0)
     let h = intptr(ctx)
     if (native || has_pending(h) || has_pending_node_drag(h)) {
@@ -740,11 +641,9 @@ def accept_new_item(ctx : imgui_node_editor::EditorContext?) : bool {
 }
 
 def reject_new_item(ctx : imgui_node_editor::EditorContext?) {
-    //! Inside begin_create, after query_new_link: refuse the link. Pops the queued
-    //! link (consumes the decision) when injecting; for a live drag calls the editor's
-    //! RejectNewItem so it draws the red "won't connect" preview. Call accept OR reject
-    //! once the app has decided — calling NEITHER keeps the (queued) offer alive across
-    //! frames, which is how an app can show an indication for a few frames before deciding.
+    //! Inside begin_create, after query_new_link: refuse the link. Pops the queued link when
+    //! injecting; for a live drag calls RejectNewItem (red "won't connect" preview). Calling
+    //! NEITHER accept nor reject keeps the offer alive across frames — deliberate.
     let h = intptr(ctx)
     if (has_pending(h)) {
         pop_pending(h)
@@ -754,12 +653,9 @@ def reject_new_item(ctx : imgui_node_editor::EditorContext?) {
 }
 
 def show_new_node_drag(ctx : imgui_node_editor::EditorContext?; var from_pin : PinId&; var drop_pos : float2&) : bool {
-    //! Inside begin_create: true the frame the user drops a pin-drag in empty canvas
-    //! (or a queued drag is served). Hands back the source pin + canvas-space drop
-    //! point and records last_new_node_drag on the editor. The app responds by opening
-    //! its create-node UI and, on pick, spawning at drop_pos + enqueue_new_link(source
-    //! -> new pin). Returns false (no out-param write) otherwise. EVENT, not a scope —
-    //! folds QueryNewNode + AcceptNewItem (green "can drop" preview during the drag).
+    //! Inside begin_create: true the frame a pin-drag is dropped in empty canvas (or a queued
+    //! drag is served), handing back the source pin + canvas-space drop point. EVENT, not a
+    //! scope — folds QueryNewNode + AcceptNewItem. Returns false, no out-param write, otherwise.
     let h = intptr(ctx)
     // Injected drag wins (pop-on-serve, one-shot) — bypasses the editor interaction,
     // same as enqueue_new_link vs a live drag.
@@ -788,15 +684,10 @@ def show_new_node_drag(ctx : imgui_node_editor::EditorContext?; var from_pin : P
 }
 
 // ===== item deletion (queue-injectable; drivable via live) =====
-//
-// Links and nodes are FULLY DECOUPLED — each has its own queue, its own servicing
-// flag, and its own query/accept/reject wrapper. Same pop-on-DECISION shape as
-// create: query PEEKS the front of its kind's queue; accept/reject POP it (accept
-// also applies the deletion, reject just drops the request). The per-kind flag tells
-// accept/reject whether the current item is queued (pop our queue) or native (defer
-// to the editor), and lets query auto-drop a still-undecided prior item so the
-// while-loop always advances — mirroring imgui-node-editor's own auto-reject-on-
-// next-query (imgui_node_editor.cpp QueryItem).
+
+// Links and nodes are FULLY DECOUPLED — separate queues, servicing flags and wrappers.
+// Pop-on-DECISION: query PEEKS its kind's queue, accept/reject POP it. The per-kind flag also
+// lets query auto-drop a still-undecided prior item so the while-loop advances (as QueryItem does).
 
 struct private PendingDelete {
     editor : uint64
@@ -962,10 +853,9 @@ def reject_deleted_node(ctx : imgui_node_editor::EditorContext?) {
 // ===== selection (per-editor; bracket SetCurrentEditor for use outside the draw loop) =====
 
 def get_selected_nodes(ctx : imgui_node_editor::EditorContext?) : array<NodeId> {
-    //! Currently-selected node ids in `ctx`. Safe to call from a toolbar button or
-    //! live command (brackets SetCurrentEditor since the context isn't current
-    //! between frames). The buffer is pointer-sized slots — node ids are written
-    //! as pointer-sized values and read back via intptr.
+    //! Currently-selected node ids in `ctx`. Safe from a toolbar button or live command
+    //! (brackets SetCurrentEditor — the context isn't current between frames). The out-buffer
+    //! is POINTER-SIZED slots: ids go in as pointer-sized values and read back via intptr.
     var result : array<NodeId>
     return <- result if (ctx == null)
     imgui_node_editor::SetCurrentEditor(ctx)
@@ -1051,16 +941,14 @@ def clear_selection(ctx : imgui_node_editor::EditorContext?) {
 }
 
 // ===== context menus (right-click; opened + drawn in a Suspend/Resume island) =====
-//
-// imgui-node-editor renders the canvas in a transformed space, so context-menu
-// detection must run inside Suspend()/Resume() (screen space). These are EVENTS,
-// not scopes — they fire true on the right-click frame and hand back the target;
-// the app decides what (if anything) to render in response (popup, button, …).
-// Each fire ALSO records the target on the editor (see CtxMenuState above), so the
-// snapshot shows it for frames to come without any app-side plumbing. Pattern:
+
+// nolint:STYLE014
+// The canvas renders in a transformed space, so context-menu detection must run inside
+// Suspend()/Resume() (screen space). These are EVENTS, not scopes — they fire true on the
+// right-click frame, hand back the target and record it (see CtxMenuState above). Pattern:
 //   with_suspended() {
 //       var id = 0
-//       if (show_node_context_menu(ctx, id))       { open_popup("node-menu") }
+//       if (show_node_context_menu(ctx, id))        { open_popup("node-menu") }
 //       elif (show_background_context_menu(ctx, p)) { open_popup("bg-menu") }
 //       popup_window(NODE_MENU, (str_id = "node-menu", …)) { ... }
 //   }
@@ -1070,11 +958,9 @@ def with_suspended(blk : block) {
     //! Bracket Suspend()/Resume() around the body. Context-menu detection and the
     //! popups it opens must run here (screen space), not under the canvas transform.
     imgui_node_editor::Suspend()
-    // Suspend() restores ImGui's screen coordinate frame, so widgets drawn here (the
-    // context-menu popups) already report screen-space item rects. Push an identity
-    // snapshot item-transform so capture_item_bbox records them verbatim instead of
-    // re-mapping through the enclosing canvas transform — otherwise their `bbox` is
-    // the double-mapped (wrong) rect and a real synthetic click warps off the target.
+    // Suspend() restores ImGui's screen coordinate frame, so widgets drawn here already report
+    // screen-space item rects. Push an IDENTITY snapshot transform so capture_item_bbox records
+    // them verbatim — otherwise `bbox` is the double-mapped rect and a synthetic click misses.
     push_snapshot_item_transform(float2(1.0, 1.0), float2(0.0, 0.0))
     {
         invoke(blk)
@@ -1133,17 +1019,10 @@ def show_link_context_menu(ctx : imgui_node_editor::EditorContext?; var lid : Li
 }
 
 // ===== clipboard / edit shortcuts (events; queue-injectable; drivable via live) =====
-//
-// The editor detects the key chords itself (Ctrl+C/X/V/D, …) when shortcuts are enabled;
-// at most one action is current per frame. The contract is a strict scope: only inside a
-// true BeginShortcut()/EndShortcut() may the Accept* be called (each ASSERTS m_InAction).
-// with_shortcuts brackets that scope; accept_<kind> is the event (true iff that action
-// fired), records it on the editor (ShortcutState telemetry), and ALSO serves an injected
-// shortcut (enqueue_shortcut) so a live command / test can drive copy/paste deterministically
-// without synthesizing keystrokes — the wrapper makes accept_<kind> return true, replaying
-// through the SAME app handler the chord drives. The editor owns no clipboard CONTENT: the
-// app serializes the target set (get_action_context_nodes/links or its selection) on copy and
-// recreates on paste — topology stays app-owned, exactly like deletes.
+
+// The editor detects the chords itself; at most one action is current per frame, and Accept* may
+// ONLY be called inside a true BeginShortcut()/EndShortcut() (each ASSERTS m_InAction).
+// The editor owns no clipboard CONTENT — the app serializes on copy and recreates on paste.
 
 let private SHORTCUT_KINDS : table<string> <- { "cut", "copy", "paste", "duplicate", "create_node" }
 
@@ -1172,16 +1051,12 @@ def private sc_pop_if(h : uint64; kind : string) : bool {
 }
 
 def private record_shortcut(ctx : imgui_node_editor::EditorContext?; kind : string) {
-    // Editor is current here (accept_* runs inside the node_editor block). The action's
-    // target set IS the selection (GetActionContextNodes/Links read GetSelectedObjects);
-    // GetSelectedObjectCount is the uniform source — GetActionContextSize reads m_Context,
-    // which is only populated for a REAL chord (0 under injection).
+    // GetSelectedObjectCount, not GetActionContextSize: the latter reads m_Context, populated only for a REAL chord (0 under injection).
     g_shortcuts[intptr(ctx)] = ShortcutState(action = kind, context_size = imgui_node_editor::GetSelectedObjectCount())
 }
 
 def private sc_take(ctx : imgui_node_editor::EditorContext?; h : uint64; kind : string; native_ok : bool) : bool {
-    // Injected wins; native_ok is pre-guarded by the caller (AcceptX() only evaluated when
-    // BeginShortcut() was true this frame, so the m_InAction assert can't trip).
+    // native_ok is pre-guarded by the caller (AcceptX() only evaluated when BeginShortcut() was true), so the m_InAction assert can't trip.
     if (sc_pop_if(h, kind) || native_ok) {
         record_shortcut(ctx, kind)
         return true
@@ -1190,11 +1065,9 @@ def private sc_take(ctx : imgui_node_editor::EditorContext?; h : uint64; kind : 
 }
 
 def with_shortcuts(ctx : imgui_node_editor::EditorContext?; blk : block) {
-    //! Bracket BeginShortcut/EndShortcut for `ctx`. Invokes the body when the editor accepted
-    //! a clipboard/edit chord this frame OR a shortcut is queued (enqueue_shortcut). Inside,
-    //! branch on accept_copy / accept_cut / accept_paste / accept_duplicate / accept_create_node.
-    //! Must run INSIDE the node_editor() block (the editor must be current), NOT inside
-    //! with_suspended. Shortcuts must be enabled (on by default; see enable_shortcuts).
+    //! Bracket BeginShortcut/EndShortcut for `ctx`. Invokes the body when the editor accepted a
+    //! chord this frame OR one is queued (enqueue_shortcut); inside, branch on accept_copy /
+    //! _cut / _paste / _duplicate / _create_node. Must run INSIDE node_editor(), NOT suspended.
     let native = imgui_node_editor::BeginShortcut()
     let h = intptr(ctx)
     g_shortcut_native[h] = native
@@ -1243,11 +1116,9 @@ def accept_create_node(ctx : imgui_node_editor::EditorContext?) : bool {
 }
 
 def enqueue_shortcut(ctx : imgui_node_editor::EditorContext?; kind : string) : bool {
-    //! Queue a shortcut to be served on `ctx`'s next frame — `kind` in {"cut","copy","paste",
-    //! "duplicate","create_node"}. with_shortcuts replays it through the app's accept_<kind>
-    //! handler exactly as a real chord, so copy/paste is drivable/testable without keystrokes.
-    //! Returns false for a null ctx or an unknown kind. Queue what your app actually handles —
-    //! an unhandled kind lingers (flush with clear_pending_shortcuts).
+    //! Queue a shortcut to be served on `ctx`'s next frame — `kind` in SHORTCUT_KINDS. Replayed
+    //! through the app's accept_<kind> handler exactly as a real chord. Queue only what the app
+    //! actually handles: an unhandled kind lingers (flush with clear_pending_shortcuts).
     return false if (ctx == null || !key_exists(SHORTCUT_KINDS, kind))
     g_pending_shortcuts |> push(PendingShortcut(editor = intptr(ctx), kind = kind))
     return true

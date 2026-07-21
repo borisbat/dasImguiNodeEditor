@@ -1,4 +1,5 @@
 options gen2
+options _comment_hygiene = true
 options indenting = 4
 options no_unused_block_arguments = false
 options no_unused_function_arguments = false
@@ -41,12 +42,9 @@ def test_connect_drag(t : T?) {
         // No link before the gesture.
         t |> success(!widget_exists(snap, "{s.canvas}/link_100"), "no link before drag")
 
-        // Synthesize the pin-drag. Grabbing a small pin needs the press to land exactly
-        // ON the pin, so park the cursor at the output pin THROUGH the press (drag_along
-        // presses ~10% into the travel — fine for a big drag-drop target, off-pin here),
-        // drag to the input pin over ~900ms with the button held, then park on the input
-        // pin through the release. imgui_mouse_play drains over wall-clock; the subject
-        // applies synth IO each frame.
+        // Grabbing a small pin needs the press to land exactly ON it, so park the cursor at
+        // the output pin THROUGH the press, drag over ~900ms with the button held, then park
+        // on the input pin through the release. drag_along presses ~10% in — off-pin here.
         var events <- [
             JV((t_ms = 0,    kind = "move",   x = out_c._0, y = out_c._1)),
             JV((t_ms = 350,  kind = "move",   x = out_c._0, y = out_c._1)),
@@ -57,7 +55,7 @@ def test_connect_drag(t : T?) {
             JV((t_ms = 1650, kind = "button", button = 0,   action = "release")),
             JV((t_ms = 1800, kind = "move",   x = in_c._0,  y = in_c._1))
         ]
-        post_command(d, "imgui_mouse_play", JV((events = events)))
+        post_command(d, "imgui_mouse_play", JV((events = events)))   // drains over wall-clock; subject applies synth IO each frame
 
         // The link should commit once the drag releases over the input pin.
         var snapL = ne_wait_widget(s, "link_100", 10.0f)

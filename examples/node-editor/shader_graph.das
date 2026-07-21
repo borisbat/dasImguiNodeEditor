@@ -1,4 +1,5 @@
 options gen2
+options _comment_hygiene = true
 
 // Data-driven shader-graph editor. The app owns the graph TOPOLOGY (a cohesive
 // Graph struct: nodes own their pins, links connect pins) — this mirrors real
@@ -72,10 +73,9 @@ var g_shortcut_action = ""                             // clipboard shortcut acc
 
 var g_paste_anchor : float2                            // canvas pos captured at accept_paste (cursor) — where paste lands
 
-// App-owned clipboard. The editor owns no clipboard content — accept_copy/cut just say
-// "a copy happened"; the app captures the selected cluster here: node kinds + RELATIVE
-// positions, plus the links INTERNAL to the selection (by node-index + pin-slot, so they
-// remap to the fresh pin ids on paste). Paste recreates the cluster preserving layout.
+// App-owned clipboard — the editor stores no content; accept_copy/cut only signal that a copy
+// happened. Captures node kinds + RELATIVE positions, plus links internal to the selection by
+// node-index + pin-slot, so they remap onto fresh pin ids on paste.
 struct ClipNode {
     kind  : NodeKind
     title : string
@@ -92,10 +92,8 @@ var g_clip_links  : array<ClipLink>
 var g_clip_origin : float2                             // top-left of the copied cluster (duplicate offsets off this)
 
 // Per-id NarrativeState slots for the loop-rendered title / pin-name text().
-// The plain text("foo") form shares ONE state global per source line, so every
-// loop iteration overwrites it and the snapshot collapses every node's value to
-// the last one rendered. Indexed text(TABLE[id], …) gives each id its own slot
-// (the data_table.das idiom) so per-node/per-pin telemetry is correct.
+// A plain text("foo") shares ONE state global per SOURCE LINE, so every loop iteration
+// overwrites it and the snapshot collapses to the last render. Indexed text(TABLE[id], …) fixes it.
 var NODE_TITLE : table<int; NarrativeState>            // keyed by node id
 var PIN_LABEL  : table<int; NarrativeState>            // keyed by pin id (input + output ids are disjoint)
 var GROUP_TITLE : table<int; NarrativeState>          // keyed by group id (disjoint — shared alloc_id)
@@ -303,11 +301,9 @@ def toolbar_spawn(kind : NodeKind) {
 }
 
 def spawn_group(title : string; pos : float2; size : float2) : int {
-    // Both pos and size are ONE-TIME seeds — the editor owns group geometry after the first
-    // frame. node_group passes gr.size only until the node becomes a group; thereafter the
-    // editor's stored bounds win and gr.size is ignored. pos seeded via the bracketed
-    // set_node_position (toolbar runs outside the node_editor block); to resize a group
-    // later, call set_group_size — mutating GroupBox.size alone won't do it.
+    // pos and size are ONE-TIME seeds — after the first frame the editor owns group geometry and
+    // gr.size is ignored; resize later via set_group_size (mutating GroupBox.size won't do it).
+    // pos goes through bracketed set_node_position: the toolbar runs outside the node_editor block.
     let gid = add_group(g_graph, title, pos, size)
     set_node_position(g_ed, gid, pos)
     return gid
@@ -450,27 +446,22 @@ def draw_editor() {
                 text(GROUP_TITLE[gr.id], (text = gr.title))
             }
         }
-        // Off-screen group labels: when the canvas is zoomed out (scale <= 0.75) the editor
-        // renders a hint overlay so group names stay readable. group_hint self-gates (no-op
-        // at normal zoom), so the loop is unconditional. Drawn into the hint draw lists,
-        // positioned at the group's canvas bounds (GetGroupMin — an allow-listed read).
+        // Off-screen group labels: zoomed out (scale <= 0.75) the editor renders a hint overlay
+        // so group names stay readable. group_hint self-gates (no-op at normal zoom), so the loop
+        // is unconditional; positioned at the group's canvas bounds (GetGroupMin, allow-listed).
         for (gr in values(g_graph.groups)) {
             group_hint(gr.id) $(var fg; var _bg) {
-                // Float the group title above the group bounds (GetGroupMin is in screen space
-                // inside a hint). _bg is the background hint list — unused here, exposed for
-                // callers that want art drawn behind the group. NB: the hint draw lists swap
-                // R/B for asymmetric colors, so use a near-grey (swap-invariant) label tint.
+                // Float the title above the group bounds; GetGroupMin is SCREEN space inside a
+                // hint. _bg is the background hint list, exposed for art behind the group.
+                // NB: hint draw lists swap R/B — use a near-grey (swap-invariant) label tint.
                 let mn = imgui_node_editor::GetGroupMin()
                 fg |> add_text(float2(mn.x + 4.0, mn.y - 18.0), rgba(232u, 226u, 210u, 255u), gr.title)
             }
         }
         for (n in values(g_graph.nodes)) {
-            // Seed each node's initial position ONCE, inside the frame right before its
-            // BeginNode — the only reliable time. An out-of-frame SetNodePosition (e.g. from
-            // the paste handler, which runs after this block) on a not-yet-rendered node does
-            // NOT commit headless: GetNodePosition keeps returning the un-laid-out sentinel.
-            // Gating on a per-node seeded set (not frame 0) covers paste/toolbar/menu nodes too;
-            // after the first render the editor owns geometry (user drags, move_node command).
+            // Seed each node's position ONCE, in-frame right before its BeginNode — the only
+            // reliable time. Out-of-frame SetNodePosition on a not-yet-rendered node does NOT
+            // commit headless: GetNodePosition keeps returning the un-laid-out sentinel.
             if (!key_exists(g_seeded, n.id)) {
                 imgui_node_editor::SetNodePosition(n.id, n.pos)
                 g_seeded |> insert(n.id)
@@ -503,21 +494,18 @@ def draw_editor() {
             link(l.id, (from = l.from_pin, to = l.to_pin))
         }
 
-        // Set when a pin-drag is released in empty canvas this frame (see below) —
-        // opens the SAME create-node popup as a right-click, with g_drag_from_pin set
-        // so the pick also connects. Frame-local: begin_create writes it, with_suspended
-        // reads it.
+        // Set when a pin-drag is released on empty canvas — opens the SAME create-node popup as
+        // a right-click, with g_drag_from_pin set so the pick also connects. Frame-local:
+        // begin_create writes it, with_suspended reads it.
         var drag_fired = false
         begin_create(g_ed) {
             var a = 0
             var b = 0
             if (query_new_link(g_ed, a, b)) {
                 if (a != 0 && b != 0) {
-                    // Pins come in DRAG order — normalize so `from` is the output, `to` the
-                    // input (reversed if the user dragged input -> output). Reject same-kind
-                    // pairs outright; can_add_link gates self-loops / duplicates / cycles.
-                    // Validity gates accept-vs-reject each frame; accept's bool return gates
-                    // the actual commit, where we replace any existing link on the input.
+                    // Pins arrive in DRAG order — normalize so `from` is the output, `to` the
+                    // input. Reject same-kind pairs; can_add_link gates self-loops / duplicates /
+                    // cycles. accept's bool return gates the actual commit.
                     if (pin_is_output(g_graph, a) == pin_is_output(g_graph, b)) {
                         reject_new_item(g_ed)
                     } else {
@@ -556,9 +544,8 @@ def draw_editor() {
         }
 
         // Clipboard / edit shortcuts (Ctrl+C/X/V/D — on by default per create_node_editor).
-        // accept_* only flags the action here (editor is current); the actual copy/paste runs
-        // AFTER the block (handle_shortcut_action) where the bracketed selection/spawn helpers
-        // are safe. Mirrors the g_request_navigate flag-then-act pattern.
+        // accept_* only flags the action here; the real copy/paste runs AFTER the block
+        // (handle_shortcut_action), where the bracketed selection/spawn helpers are safe.
         with_shortcuts(g_ed) {
             if (accept_copy(g_ed)) {
                 g_shortcut_action = "copy"
@@ -566,12 +553,9 @@ def draw_editor() {
                 g_shortcut_action = "cut"
             } elif (accept_paste(g_ed)) {
                 g_shortcut_action = "paste"
-                // Capture the cursor in canvas space NOW (editor is current; ScreenToCanvas
-                // needs it). handle_shortcut_action runs post-block where it'd be unavailable.
-                // Guard the mouse: a keyboard Ctrl+V with no on-canvas cursor (and every headless
-                // frame, where IsMousePosValid is false) yields a -FLT_MAX GetMousePos, which
-                // ScreenToCanvas turns into a garbage anchor. Fall back to just past the copied
-                // cluster — the same offset duplicate uses.
+                // Capture the cursor in canvas space NOW — ScreenToCanvas needs the editor
+                // current, and handle_shortcut_action runs post-block. Guard the mouse: keyboard
+                // Ctrl+V and every headless frame give an invalid -FLT_MAX GetMousePos.
                 g_paste_anchor = (is_mouse_pos_valid()
                     ? imgui_node_editor::ScreenToCanvas(GetMousePos())
                     : g_clip_origin + float2(30.0, 30.0))
@@ -610,10 +594,9 @@ def draw_editor() {
                     g_graph.links |> erase(g_ctx_link)
                 }
             }
-            // Explicit idents (CREATE_*) give the menu items stable snapshot paths
-            // (MAIN_WIN/shader_graph/BG_CTX/CREATE_*). When opened by a pin-drag the
-            // list is filtered to connectable kinds (connectable()), so a non-fitting
-            // item is simply absent from the snapshot — which the test asserts.
+            // Explicit idents (CREATE_*) give the menu items stable snapshot paths. When opened
+            // by a pin-drag the list is filtered to connectable kinds, so a non-fitting item is
+            // simply absent from the snapshot — which the test asserts.
             popup_window(BG_CTX, (str_id = "ne_bg_menu", flags = ImGuiWindowFlags.None)) {
                 if (g_drag_from_pin != 0) {
                     text("Create + Connect")
@@ -638,10 +621,9 @@ def draw_editor() {
             }
         }
 
-        // Fit-on-startup: once the initial graph has laid out (node bounds are valid only
-        // after a node's first render — see the seeding note above), fit it to the view.
-        // Also serviced by the navigate_to_content live command. NavigateToContent must run
-        // with the editor current — here, inside the node_editor block.
+        // Fit-on-startup once the initial graph has laid out (node bounds are valid only after a
+        // node's first render). Also serviced by the navigate_to_content live command.
+        // NavigateToContent must run with the editor current — here, inside node_editor.
         if (!g_did_startup_fit && !empty(g_seeded)) {
             g_request_navigate = true
             g_did_startup_fit = true

@@ -1,4 +1,5 @@
 options gen2
+options _comment_hygiene = true
 
 require imgui_node_editor
 require imgui/imgui_node_editor_lint

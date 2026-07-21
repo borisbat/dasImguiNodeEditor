@@ -1,4 +1,5 @@
 options gen2
+options _comment_hygiene = true
 
 require imgui/imgui_harness
 require imgui/imgui_node_editor_boost_v2
@@ -43,11 +44,9 @@ def draw_editor() {
                 text("out ->")
             }
         }
-        // (2) Default look — no tint, square corners, default border. Inputs attach on
-        // the left edge (pivot x = 0), outputs on the right (x = 1); without a pivot the
-        // link springs from the pin label's center, which looks untidy on a multi-pin node.
-        // Every pin id is unique across the whole editor — 21/22 here, distinct from node 1's
-        // output 12 and node 3's input 31 (same-id pins silently merge into one).
+        // (2) Default look — no tint, square corners, default border. Inputs pivot on the
+        // left edge (x = 0), outputs on the right (x = 1); with no pivot the link springs
+        // from the pin label's center. Pin ids are unique editor-wide — same ids merge.
         node(2) {
             text("Passthrough")
             pin(21, (kind = PinKind.Input, pivot_alignment = float2(0.0, 0.5))) {

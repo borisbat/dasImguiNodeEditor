@@ -1,4 +1,5 @@
 options gen2
+options _comment_hygiene = true
 options indenting = 4
 
 options _allow_node_editor_native = true   // this IS the wrapper that owns the ed::Style calls
