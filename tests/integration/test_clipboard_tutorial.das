@@ -15,10 +15,12 @@ require daslib/json_boost public
 //! shortcut gate is IsFocused), then Ctrl+D duplicates it and Ctrl+C / Ctrl+V copy+paste
 //! it. The node count confirms the app's clipboard recreated the topology.
 //!
-//! imgui-node-editor checks io.KeyCtrl directly, so the chord is Ctrl on every platform
-//! (NOT Cmd on macOS — unlike an ImGui InputText). Distinct from test_clipboard.das /
-//! test_shortcuts.das, which drive shader_graph through the ne_shortcut INJECTION rail;
-//! this proves the real key chord routes through the same accept_<kind> path end to end.
+//! imgui-node-editor checks io.KeyCtrl directly, so the user chord is Ctrl on every platform
+//! (NOT Cmd on macOS — unlike an ImGui InputText). The synthetic AddKeyEvent path swaps
+//! Ctrl/Super under ConfigMacOSXBehaviors, so this test feeds Super there to surface io.KeyCtrl.
+//! Distinct from test_clipboard.das / test_shortcuts.das, which drive shader_graph through the
+//! ne_shortcut INJECTION rail; this proves the real key chord routes through the same
+//! accept_<kind> path end to end.
 
 let SUBJECT = "modules/dasImguiNodeEditor/examples/tutorial/clipboard.das"
 
@@ -29,6 +31,9 @@ def test_clipboard_tutorial(t : T?) {
         t |> success(s.handle != uint64(0), "editor handle present")
         if (s.handle == uint64(0)) return
         let canvas = s.canvas
+        var initial_snap = ne_snapshot(s)
+        let macos = initial_snap?["io"]?["config_macos_behaviors"] ?? false
+        let shortcut_mod = macos ? "Super" : "Ctrl"
 
         t |> success(ne_wait_widget(s, "node_1", 15.0f) != null, "seed graph rendered")
         t |> equal(ne_node_count(s), 2, "2 seed nodes initially")
@@ -37,7 +42,7 @@ def test_clipboard_tutorial(t : T?) {
         click(d, "{canvas}/node_1/NODE_TITLE[1]")
         wait_for_mouse_idle(d)
         t |> success(ne_wait_selected(s, 1) != null, "node_1 selected before Ctrl+D")
-        post_command(d, "imgui_key_chord", JV((mods = ["Ctrl"], key = "D")))
+        post_command(d, "imgui_key_chord", JV((mods = [shortcut_mod], key = "D")))
         t |> success(wait_for_key_idle(d, 4.0f), "Ctrl+D chord completes")
         var dup = ne_wait_widget(s, "node_200", 6.0f)
         t |> success(dup != null, "Ctrl+D duplicated the selected node (clone node_200 spawned)")
@@ -47,9 +52,9 @@ def test_clipboard_tutorial(t : T?) {
         click(d, "{canvas}/node_2/NODE_TITLE[2]")
         wait_for_mouse_idle(d)
         t |> success(ne_wait_selected(s, 2) != null, "node_2 selected before Ctrl+C")
-        post_command(d, "imgui_key_chord", JV((mods = ["Ctrl"], key = "C")))
+        post_command(d, "imgui_key_chord", JV((mods = [shortcut_mod], key = "C")))
         t |> success(wait_for_key_idle(d, 4.0f), "Ctrl+C chord completes")
-        post_command(d, "imgui_key_chord", JV((mods = ["Ctrl"], key = "V")))
+        post_command(d, "imgui_key_chord", JV((mods = [shortcut_mod], key = "V")))
         t |> success(wait_for_key_idle(d, 4.0f), "Ctrl+V chord completes")
         var pasted = ne_wait_widget(s, "node_210", 6.0f)
         t |> success(pasted != null, "Ctrl+C then Ctrl+V pasted the copied node (node_210 spawned)")
