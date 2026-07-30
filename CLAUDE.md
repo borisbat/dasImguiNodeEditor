@@ -2,11 +2,12 @@
 
 dasImguiNodeEditor is the daslang binding + boost-v2 wrapper layer for
 [imgui-node-editor](https://github.com/thedmd/imgui-node-editor) (v0.9.3, vendored).
-It is built **on top of [dasImgui](https://github.com/borisbat/dasImgui)** and mirrors
-its conventions — `[widget]`/`[container]` macros, the snapshot/telemetry path, the
-default-on raw-call lint, the `imgui_harness` lifecycle, dastest integration tests, and
-the `daslang-live` HTTP driver. **Read dasImgui's `CLAUDE.md` first** for all of that
-shared machinery; this file documents only what is node-editor-specific.
+It is built **on top of dasImgui** (part of the daslang tree, `modules/dasImgui`) and
+mirrors its conventions — `[widget]`/`[container]` macros, the snapshot/telemetry path,
+the default-on raw-call lint, the `imgui_harness` lifecycle, dastest integration tests,
+and the `daslang-live` HTTP driver. **Read `modules/dasImgui/CLAUDE.md` in the daslang
+tree first** for all of that shared machinery; this file documents only what is
+node-editor-specific.
 
 `STATE.md` is the live working-notes/status doc (design rationale, verified-live logs,
 known bugs, roadmap). This file is durable instructions; defer to `STATE.md` for "why"
@@ -29,14 +30,17 @@ daslib module MUST get its own line there, or `require imgui/<name>` fails with
 
 ## Dev workflow
 
-- **Junction root `D:\Work\IMGUI`** with `modules\dasImgui` → `D:\DASPKG\dasImgui` and
-  `modules\dasImguiNodeEditor` → `D:\DASPKG\dasImguiNodeEditor`. Edit source under
-  `D:\DASPKG\…`; compile/run/lint with **`-project_root D:/Work/IMGUI`** (MCP tools:
+- **Junction root `D:\Work\IMGUI`** with `modules\dasImgui` → `D:\Work\daScript\modules\dasImgui`
+  (the daslang tree's in-tree module) and `modules\dasImguiNodeEditor` →
+  `D:\DASPKG\dasImguiNodeEditor`. Edit node-editor source under `D:\DASPKG\…`;
+  compile/run/lint with **`-project_root D:/Work/IMGUI`** (MCP tools:
   `project_root: "D:/Work/IMGUI"`).
 - **C++ build:** `cmake --build D:/DASPKG/dasImguiNodeEditor/_build --config Release -j 64`
-  (configure once with `-DDASLANG_DIR=D:/Work/daScript`). **dasImgui must be built first**
-  (sibling under the same parent — the node-editor C++ links `dasModuleImgui`; the configure
-  derives `DAS_IMGUI_DIR` as `<repo-parent>/dasImgui`). **Shut down `daslang-live` before
+  (configure once with `-DDASLANG_DIR=D:/Work/daScript`, `-S` the junction path
+  `D:/Work/IMGUI/modules/dasImguiNodeEditor` so the configure derives `DAS_IMGUI_DIR` as
+  the sibling `modules/dasImgui`). **daslang must be built first** — its
+  `dasModuleImgui`/`imguiApp`/`imguiAppHeadless` targets emit the dasImgui artifacts the
+  node-editor C++ links into `modules/dasImgui/`. **Shut down `daslang-live` before
   relinking** — it holds `dasModuleImguiNodeEditor.shared_module` open.
 - **Stale-build-dir gotcha (cmake upgrade):** if `cmake --build` fails its reconfigure with
   `.../share/cmake-<old>/Modules/... does not exist`, the `_build` dir is pinned to a removed
@@ -180,11 +184,12 @@ lifecycle) can't be bypassed. Per-file opt-out: `options _allow_node_editor_nati
 
 `tests/integration/*.das` via `dastest` + `with_node_editor_app`. Run **headless** (spawned
 daslang-live subprocesses else pop real windows and flake), cwd at the node-editor root.
-Single file: `daslang -load_module D:/DASPKG/dasImgui -load_module D:/DASPKG/dasImguiNodeEditor
-dastest.das -- --run modules/dasImguiNodeEditor/tests/integration/<t>.das --headless`. Sweep
+Single file: `daslang -load_module D:/DASPKG/dasImguiNodeEditor
+dastest.das -- --run modules/dasImguiNodeEditor/tests/integration/<t>.das --headless`
+(dasImgui resolves natively from the daslang tree — no `-load_module` for it). Sweep
 stale `daslang`/`daslang-live`/`dastest` procs between runs (port 9090 reuse). CI:
-`.github/workflows/tests.yml` (ubuntu/macos/windows; `daspkg install ../dasImgui` THEN
-`../dasImguiNodeEditor` — dependency order).
+`.github/workflows/tests.yml` (ubuntu/macos; dasImgui builds in-tree with daslang, only
+`daspkg install ../dasImguiNodeEditor`).
 
 **Test helpers (`imgui_editor_playwright`)** — layered on dasImgui's `imgui_playwright`
 (re-exported, so `require imgui/imgui_editor_playwright public` is all a test needs beyond

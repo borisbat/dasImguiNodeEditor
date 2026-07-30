@@ -1,10 +1,11 @@
 name: Integration tests
 
-# Headless live-driven integration suite for dasImguiNodeEditor, mirroring
-# dasImgui's tests.yml. The node editor depends on dasImgui, so CI checks out
-# BOTH packages and installs them in dependency order (dasImgui first — the
-# node-editor C++ module links dasModuleImgui and uses dasImgui's imgui headers,
-# see CMakeLists.txt). Tests run without a display server via the harness's
+# Headless live-driven integration suite for dasImguiNodeEditor. The node
+# editor depends on dasImgui, which is part of the daslang tree
+# (modules/dasImgui) — the daslang checkout provides it, and the daslang build
+# below produces the dasModuleImgui/imguiApp/imguiAppHeadless shared twins the
+# node-editor C++ module links (see CMakeLists.txt). Only this repo is
+# daspkg-installed. Tests run without a display server via the harness's
 # --headless arm (ImGui context with a CPU font atlas, no GLFW window/GL ctx);
 # the HTTP live-API (port 9090) still serves so the playwright /status+/command+
 # /shutdown flow is unchanged.
@@ -52,12 +53,6 @@ jobs:
           repository: GaijinEntertainment/daScript
           path: daslang-src
           ref: master
-
-      - name: "Checkout dasImgui (dependency)"
-        uses: actions/checkout@v4
-        with:
-          repository: borisbat/dasImgui
-          path: dasImgui
 
       - name: "Checkout dasImguiNodeEditor"
         uses: actions/checkout@v4
@@ -129,7 +124,9 @@ jobs:
         # Ninja on all three OSes (single-config Release, binaries in bin/).
         # Windows: cl.exe via msvc-dev-cmd; OpenSSL prebuilt from vcpkg
         # (toolchain QUOTED — $VCPKG_ROOT can contain spaces). MSBuild was
-        # ~1.5-2x slower here.
+        # ~1.5-2x slower here. dasModuleImgui/imguiApp/imguiAppHeadless are the
+        # in-tree dasImgui shared twins (artifacts land in modules/dasImgui/,
+        # where this repo's CMake resolves them as a sibling).
         run: |
           set -eux
           if [ "${{ matrix.os }}" = "windows-latest" ]; then
@@ -157,17 +154,10 @@ jobs:
           cmake --build ./build --parallel --target \
             daslang daslang-live \
             dasModuleLiveHost dasModuleGlfw dasModuleHV \
-            dasModulePUGIXML dasModuleStbImage
+            dasModulePUGIXML dasModuleStbImage \
+            dasModuleImgui imguiApp imguiAppHeadless
           sccache --show-stats
           echo "BIN_DIR=bin" >> "$GITHUB_ENV"
-
-      - name: "daspkg install dasImgui (global)"
-        # dasImgui first — the node-editor C++ module links dasModuleImgui and
-        # uses dasImgui's imgui headers (CMakeLists.txt resolves it as a sibling).
-        working-directory: daslang-src
-        run: |
-          set -eux
-          ${BIN_DIR}/daslang utils/daspkg/main.das -- install ../dasImgui --global
 
       - name: "daspkg install dasImguiNodeEditor (global)"
         working-directory: daslang-src
@@ -183,7 +173,7 @@ jobs:
         # dasImgui's with_imgui_app, which reads --worker-index and derives a
         # per-worker live-API port (9090 + N), passed to the spawned daslang-live
         # as --live-port. So the 4 workers bind ports 9090/9091/9092/9093 and don't
-        # race for 9090. Mirrors dasImgui's tests.yml (~3x wall-time reduction).
+        # race for 9090. Mirrors daslang's nightly_imgui.yml (~3x wall-time reduction).
         #
         # No --exclude entries: unlike dasImgui, the node-editor suite has no
         # GLFW-event-queue synth tests (glfw_synth / key_hud) and no >16-POST

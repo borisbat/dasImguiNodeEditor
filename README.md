@@ -21,7 +21,7 @@ def dependencies(version : string) {
 
 Then run `daspkg install`.
 
-**Note:** This package depends on [dasImgui](https://github.com/borisbat/dasImgui), which will be installed automatically.
+**Note:** This package depends on dasImgui, which is part of the daslang tree (`modules/dasImgui`) — it ships with daslang, no separate install needed.
 
 ## Build
 
@@ -41,7 +41,7 @@ cmake --build modules/dasImguiNodeEditor/_build --config Release
 ### Requirements
 
 - daslang SDK (built with dynamic modules support)
-- dasImgui package (installed and built)
+- dasImgui (ships with daslang at `modules/dasImgui`; built by the daslang build)
 - CMake 3.16+
 - C++17 compiler (MSVC, GCC, Clang)
 
