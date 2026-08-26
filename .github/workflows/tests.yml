@@ -1,0 +1,193 @@
+name: Integration tests
+
+# Headless live-driven integration suite for dasImguiNodeEditor. The node
+# editor depends on dasImgui, which is part of the daslang tree
+# (modules/dasImgui) — the daslang checkout provides it, and the daslang build
+# below produces the dasModuleImgui/imguiApp/imguiAppHeadless shared twins the
+# node-editor C++ module links (see CMakeLists.txt). Only this repo is
+# daspkg-installed. Tests run without a display server via the harness's
+# --headless arm (ImGui context with a CPU font atlas, no GLFW window/GL ctx);
+# the HTTP live-API (port 9090) still serves so the playwright /status+/command+
+# /shutdown flow is unchanged.
+#
+# fail-fast:false so all three OSes report. As with dasImgui, Windows is the
+# reliable green; POSIX runners may hang in dasHV's HTTP serving under headless.
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: tests-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  integration:
+    runs-on: ${{ matrix.os }}
+    env:
+      # Cache daslang's C++ object compilation across runs (GitHub Actions cache
+      # backend). The daslang build is a full clean rebuild every run — first run
+      # populates, later runs hit. See the "Set up sccache" step + the
+      # CMAKE_*_COMPILER_LAUNCHER flags on the cmake configure below.
+      SCCACHE_GHA_ENABLED: "true"
+    strategy:
+      fail-fast: false
+      matrix:
+        # windows-latest temporarily disabled: the reset()-consolidated tests
+        # fastfail (exit 0xC0000409 — __fastfail bypasses SEH, so no stack is
+        # printed) ONLY on the CI windows runner; not reproducible locally or on
+        # POSIX. Re-enable once crash diagnostics land (Release .pdb + dastest
+        # subprocess crash-stack capture + a WER/local minidump for fastfail).
+        os: [ubuntu-latest, macos-latest]
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: "Checkout daslang"
+        uses: actions/checkout@v4
+        with:
+          repository: GaijinEntertainment/daScript
+          path: daslang-src
+          ref: master
+
+      - name: "Checkout dasImguiNodeEditor"
+        uses: actions/checkout@v4
+        with:
+          path: dasImguiNodeEditor
+
+      - name: "Exclude workspace from Windows Defender (Windows)"
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        continue-on-error: true
+        # Real-time Defender scans every .obj/.exe/.dll the build writes and
+        # every process + DLL load at test time; excluding the workspace cuts
+        # both compile and run wall-time. continue-on-error: a managed-Defender
+        # runner must not fail the job.
+        run: |
+          Add-MpPreference -ExclusionPath "${{ github.workspace }}"
+          Add-MpPreference -ExclusionProcess "daslang.exe"
+          Add-MpPreference -ExclusionProcess "daslang-live.exe"
+
+      - name: "Install system dependencies (Linux)"
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libglfw3-dev \
+            libfreetype6-dev \
+            mesa-common-dev \
+            xorg-dev
+
+      - name: "Install system dependencies (macOS)"
+        if: matrix.os == 'macos-latest'
+        run: |
+          brew install glfw freetype bison
+          echo "/opt/homebrew/opt/bison/bin" >> "$GITHUB_PATH"
+
+      - name: "Install CMake and Ninja"
+        uses: lukka/get-cmake@latest
+
+      - name: "Set up sccache"
+        # Installs the sccache binary and wires the GitHub Actions cache backend
+        # (gated by SCCACHE_GHA_ENABLED at the job level). The cmake configure
+        # below routes cl/clang/gcc through it via CMAKE_*_COMPILER_LAUNCHER.
+        uses: mozilla-actions/sccache-action@v0.0.9
+
+      - name: "Set up MSVC environment (Windows)"
+        if: matrix.os == 'windows-latest'
+        # Put cl.exe / link.exe / lib.exe on PATH so the bash build step can
+        # drive Ninja with MSVC. msvc-dev-cmd exports the dev-env vars to
+        # $GITHUB_ENV, which subsequent bash steps inherit.
+        # MUST run BEFORE the vcpkg step below: msvc-dev-cmd's vcvars sets
+        # VCPKG_ROOT to the VS-bundled vcpkg, so the vcpkg step has to write our
+        # VCPKG_ROOT last for the build to find our prebuilt openssl.
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: "Install OpenSSL via vcpkg (Windows)"
+        if: matrix.os == 'windows-latest'
+        # Runs after msvc-dev-cmd so our VCPKG_ROOT wins (see above).
+        run: |
+          git clone https://github.com/microsoft/vcpkg
+          ./vcpkg/bootstrap-vcpkg.sh
+          ./vcpkg/vcpkg install openssl:x64-windows --binarycaching
+          echo "VCPKG_ROOT=$(pwd)/vcpkg" >> $GITHUB_ENV
+          echo "/c/Strawberry/perl/bin" >> $GITHUB_PATH
+
+      - name: "Build daslang + daslang-live + shared modules"
+        working-directory: daslang-src
+        # Ninja on all three OSes (single-config Release, binaries in bin/).
+        # Windows: cl.exe via msvc-dev-cmd; OpenSSL prebuilt from vcpkg
+        # (toolchain QUOTED — $VCPKG_ROOT can contain spaces). MSBuild was
+        # ~1.5-2x slower here. dasModuleImgui/imguiApp/imguiAppHeadless are the
+        # in-tree dasImgui shared twins (artifacts land in modules/dasImgui/,
+        # where this repo's CMake resolves them as a sibling).
+        run: |
+          set -eux
+          if [ "${{ matrix.os }}" = "windows-latest" ]; then
+            cmake --no-warn-unused-cli -B./build \
+              -DCMAKE_BUILD_TYPE:STRING=Release \
+              -DDAS_HV_DISABLED=OFF \
+              -DDAS_PUGIXML_DISABLED=OFF \
+              -DDAS_LLVM_DISABLED=ON \
+              -DDAS_GLFW_DISABLED=OFF \
+              -DCMAKE_C_COMPILER_LAUNCHER=sccache \
+              -DCMAKE_CXX_COMPILER_LAUNCHER=sccache \
+              -DCMAKE_TOOLCHAIN_FILE="$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" \
+              -G Ninja
+          else
+            cmake --no-warn-unused-cli -B./build \
+              -DCMAKE_BUILD_TYPE:STRING=Release \
+              -DDAS_HV_DISABLED=OFF \
+              -DDAS_PUGIXML_DISABLED=OFF \
+              -DDAS_LLVM_DISABLED=ON \
+              -DDAS_GLFW_DISABLED=OFF \
+              -DCMAKE_C_COMPILER_LAUNCHER=sccache \
+              -DCMAKE_CXX_COMPILER_LAUNCHER=sccache \
+              -G Ninja
+          fi
+          cmake --build ./build --parallel --target \
+            daslang daslang-live \
+            dasModuleLiveHost dasModuleGlfw dasModuleHV \
+            dasModulePUGIXML dasModuleStbImage \
+            dasModuleImgui imguiApp imguiAppHeadless
+          sccache --show-stats
+          echo "BIN_DIR=bin" >> "$GITHUB_ENV"
+
+      - name: "daspkg install dasImguiNodeEditor (global)"
+        working-directory: daslang-src
+        run: |
+          set -eux
+          ${BIN_DIR}/daslang utils/daspkg/main.das -- install ../dasImguiNodeEditor --global
+
+      - name: "Run integration tests (headless)"
+        working-directory: ${{ github.workspace }}/daslang-src
+        # --isolated-mode + --isolated-mode-threads 4: each test runs in its own
+        # subprocess, with 4 in parallel. dastest brands each subprocess argv with
+        # --worker-index N (N in 0..3); with_node_editor_app is a thin wrapper over
+        # dasImgui's with_imgui_app, which reads --worker-index and derives a
+        # per-worker live-API port (9090 + N), passed to the spawned daslang-live
+        # as --live-port. So the 4 workers bind ports 9090/9091/9092/9093 and don't
+        # race for 9090. Mirrors daslang's nightly_imgui.yml (~3x wall-time reduction).
+        #
+        # No --exclude entries: unlike dasImgui, the node-editor suite has no
+        # GLFW-event-queue synth tests (glfw_synth / key_hud) and no >16-POST
+        # Windows-stall tests — every test drives synth IO through the harness and
+        # stays within libhv's per-subprocess POST ceiling. Add excludes here if a
+        # heavy test is later introduced.
+        env:
+          DASLIVE_HV_LOG: stderr
+          DASLIVE_HV_LOG_LEVEL: DEBUG
+        run: |
+          set -eux
+          ${BIN_DIR}/daslang dastest/dastest.das -- \
+            --test modules/dasImguiNodeEditor/tests/integration \
+            --timeout 600 \
+            --isolated-mode \
+            --isolated-mode-threads 4 \
+            --headless
