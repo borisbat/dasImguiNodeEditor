@@ -16,8 +16,10 @@ require daslib/json_boost public
 //! it. The node count confirms the app's clipboard recreated the topology.
 //!
 //! imgui-node-editor checks io.KeyCtrl directly, so the user chord is Ctrl on every platform
-//! (NOT Cmd on macOS — unlike an ImGui InputText). The synthetic AddKeyEvent path swaps
-//! Ctrl/Super under ConfigMacOSXBehaviors, so this test feeds Super there to surface io.KeyCtrl.
+//! (NOT Cmd on macOS - unlike an ImGui InputText). Synth keys are LOGICAL: dasImgui pre-swaps
+//! Ctrl/Super under ConfigMacOSXBehaviors to cancel ImGui's own AddKeyEvent swap
+//! (imgui_boost_runtime.das), so feeding Ctrl lands as io.KeyCtrl everywhere - feeding Super
+//! there double-swaps and no chord fires.
 //! Distinct from test_clipboard.das / test_shortcuts.das, which drive shader_graph through the
 //! ne_shortcut INJECTION rail; this proves the real key chord routes through the same
 //! accept_<kind> path end to end.
@@ -31,9 +33,7 @@ def test_clipboard_tutorial(t : T?) {
         t |> success(s.handle != uint64(0), "editor handle present")
         if (s.handle == uint64(0)) return
         let canvas = s.canvas
-        var initial_snap = ne_snapshot(s)
-        let macos = initial_snap?["io"]?["config_macos_behaviors"] ?? false
-        let shortcut_mod = macos ? "Super" : "Ctrl"
+        let shortcut_mod = "Ctrl"
 
         t |> success(ne_wait_widget(s, "node_1", 15.0f) != null, "seed graph rendered")
         t |> equal(ne_node_count(s), 2, "2 seed nodes initially")

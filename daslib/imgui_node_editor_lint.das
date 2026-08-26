@@ -36,7 +36,6 @@ module imgui_node_editor_lint shared private
 //! lint / daspkg install).
 
 require daslib/ast_boost
-require strings
 
 let private ALLOWED_NE : table<string> <- {
     // Geometry / topology / selection reads — pure queries, no host needed (the
@@ -75,8 +74,9 @@ class NodeEditorLintVisitor : AstVisitor {
     }
 
     def override preVisitExprCall(var expr : ExprCall?) : void {
-        // Also skips macro-synthesized call sites: their `at` points at the macro template's file, not the user's.
+        // a spliced wrapper body is `generated` and carries the CALL SITE's location, so the file compare below cannot see it
         if (expr.func == null || expr.func._module == null
+                || expr.genFlags.generated
                 || (current_function != null
                     && (current_function.flags.generated
                         || (current_function.at.fileInfo != null
@@ -86,7 +86,7 @@ class NodeEditorLintVisitor : AstVisitor {
             let fname = string(expr.func.name)
             if (!key_exists(ALLOWED_NE, fname)) {
                 compiling_program() |> macro_error(expr.at,
-                    "NODEEDITOR001: raw imgui_node_editor::{fname} is forbidden — use the wrapper in modules/dasImguiNodeEditor/daslib/imgui_node_editor_boost_v2.das (node/pin/link, begin_create/begin_delete + query/accept/reject, get_selected_*/select_*/clear_selection, create_node_editor/node_editor). Bypassing the create/delete wrappers breaks live-command queue injection. If {fname} is a genuinely host-agnostic read, extend ALLOWED_NE in imgui_node_editor_lint.das. Per-file escape: `options _allow_node_editor_native = true`.")
+                    "NODEEDITOR001: raw imgui_node_editor::{fname} is forbidden - use the wrapper in modules/dasImguiNodeEditor/daslib/imgui_node_editor_boost_v2.das (node/pin/link, begin_create/begin_delete + query/accept/reject, get_selected_*/select_*/clear_selection, create_node_editor/node_editor). Bypassing the create/delete wrappers breaks live-command queue injection. If {fname} is a genuinely host-agnostic read, extend ALLOWED_NE in imgui_node_editor_lint.das. Per-file escape: `options _allow_node_editor_native = true`.")
             }
         }
     }
