@@ -29,19 +29,12 @@ namespace das {
         fnLink->arg_init(3, new ExprConstFloat4(float4(1.0f)));
         // time to fix-up const & ImVec2 and const & ImVec4
         for ( auto & pfn : this->functions.each() ) {
-            bool anyString = false;
             for ( auto & arg : pfn->arguments ) {
                 if ( arg->type->constant && arg->type->ref && !arg->type->isArray() ) {
                     if ( arg->type->baseType==Type::tFloat2 || arg->type->baseType==Type::tFloat4 ) {
                         arg->type->ref = false;
                     }
                 }
-                if ( arg->type->isString() && !arg->type->ref ) {
-                    anyString = true;
-                }
-            }
-            if ( anyString ) {
-                pfn->needStringCast = true;
             }
         }
     }
