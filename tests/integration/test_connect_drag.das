@@ -26,8 +26,8 @@ def private widget_center(var snap : JsonValue?; ident : string) : tuple<float; 
 def test_connect_drag(t : T?) {
     with_node_editor_app(CONNECT_BY_DRAG) $(d) {
         let s = ne_open(d, "MAIN_WIN/graph")
-        t |> success(s.handle != uint64(0), "editor handle present")
-        if (s.handle == uint64(0)) return
+        t |> success(s.handle != 0ul, "editor handle present")
+        if (s.handle == 0ul) return
 
         // Both pins must render (screen-space bbox) before we can target them.
         t |> success(ne_wait_widget(s, "node_1/pin_11", 15.0f) != null, "output pin rendered")

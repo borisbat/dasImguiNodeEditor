@@ -44,7 +44,7 @@ def main {
         let NEW_NODE = "{CANVAS}/node_200"
 
         let s = ne_open(app, CANVAS)
-        if (s.handle == uint64(0)) {
+        if (s.handle == 0ul) {
             panic("{CANVAS} never rendered / no editor handle - wrong app running?")
         }
         var snap = wait_for_widget(app, T_A, 15.0f)

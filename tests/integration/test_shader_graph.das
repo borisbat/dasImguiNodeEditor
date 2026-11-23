@@ -27,8 +27,8 @@ def test_shader_graph(t : T?) {
         t |> run("topology") <| @(t : T?) {
             // Gate 1+2: canvas rendered → sample graph present, handle exposed.
             let s = ne_open(d, "MAIN_WIN/shader_graph")
-            t |> success(s.handle != uint64(0), "editor canvas rendered + handle present")
-            if (s.handle == uint64(0)) return
+            t |> success(s.handle != 0ul, "editor canvas rendered + handle present")
+            if (s.handle == 0ul) return
             var snap0 = ne_snapshot(s)
             t |> success(ne_node_exists(snap0, s, 5), "sample node_5 present")
             t |> success(widget_exists(snap0, "{s.canvas}/link_11"), "sample link_11 present")
@@ -66,8 +66,8 @@ def test_shader_graph(t : T?) {
         //! flow_cmd / flow() wrapper: transient visual pulse, non-destructive, no telemetry.
         t |> run("flow") <| @(t : T?) {
             let s = ne_open(d, "MAIN_WIN/shader_graph")
-            t |> success(s.handle != uint64(0), "editor canvas rendered + handle present")
-            if (s.handle == uint64(0)) return
+            t |> success(s.handle != 0ul, "editor canvas rendered + handle present")
+            if (s.handle == 0ul) return
 
             // Flow an existing sample link — wrapper runs, command returns a response.
             let resp = post_command(d, "flow_cmd", JV((editor = s.handle, id = 11)))
@@ -82,8 +82,8 @@ def test_shader_graph(t : T?) {
         //! Node ops: z-order folds into node payload; ne_node_count enumerates draw order.
         t |> run("node_ops") <| @(t : T?) {
             let s = ne_open(d, "MAIN_WIN/shader_graph")
-            t |> success(s.handle != uint64(0), "editor handle present")
-            if (s.handle == uint64(0)) return
+            t |> success(s.handle != 0ul, "editor handle present")
+            if (s.handle == 0ul) return
             var snap0 = ne_wait_widget(s, "node_5", 15.0f)
             t |> success(snap0 != null, "sample node_5 rendered")
             if (snap0 == null) return
@@ -106,8 +106,8 @@ def test_shader_graph(t : T?) {
         //! Link validity rules: dedupe, single-input replace, self-loop + cycle rejection.
         t |> run("link_rules") <| @(t : T?) {
             let s = ne_open(d, "MAIN_WIN/shader_graph")
-            t |> success(s.handle != uint64(0), "editor handle present")
-            if (s.handle == uint64(0)) return
+            t |> success(s.handle != 0ul, "editor handle present")
+            if (s.handle == 0ul) return
             t |> success(ne_wait_widget(s, "node_5", 15.0f) != null, "sample graph rendered")
 
             // Spawn two Mul nodes (deterministic ids 14 + 18 off the fresh sample graph).
@@ -159,8 +159,8 @@ def test_shader_graph(t : T?) {
         //! node_group entity: registers as node_group_{id} with a lazily-built bbox payload.
         t |> run("node_group") <| @(t : T?) {
             let s = ne_open(d, "MAIN_WIN/shader_graph")
-            t |> success(s.handle != uint64(0), "editor canvas rendered + handle present")
-            if (s.handle == uint64(0)) return
+            t |> success(s.handle != 0ul, "editor canvas rendered + handle present")
+            if (s.handle == 0ul) return
             t |> success(!widget_exists(ne_snapshot(s), "{s.canvas}/node_group_14"),
                          "no group present initially")
 
@@ -189,8 +189,8 @@ def test_shader_graph(t : T?) {
         //! Non-telemetry render rails: with_style_var/color compose, pin pivot, group_hint.
         t |> run("render_config") <| @(t : T?) {
             let s = ne_open(d, "MAIN_WIN/shader_graph")
-            t |> success(s.handle != uint64(0), "editor handle present")
-            if (s.handle == uint64(0)) return
+            t |> success(s.handle != 0ul, "editor handle present")
+            if (s.handle == 0ul) return
             var snap0 = ne_wait_widget(s, "node_9", 15.0f)
             t |> success(snap0 != null, "styled output node (node_9) rendered")
             if (snap0 == null) return
@@ -232,8 +232,8 @@ def test_shader_graph(t : T?) {
         //! Clipboard/edit shortcuts: duplicate + copy/paste via the injection rail.
         t |> run("shortcuts") <| @(t : T?) {
             let s = ne_open(d, "MAIN_WIN/shader_graph")
-            t |> success(s.handle != uint64(0), "editor handle present")
-            if (s.handle == uint64(0)) return
+            t |> success(s.handle != 0ul, "editor handle present")
+            if (s.handle == 0ul) return
             t |> success(ne_wait_widget(s, "node_5", 15.0f) != null, "sample graph rendered")
             t |> equal(ne_node_count(s), 4, "4 sample nodes initially")
 
@@ -262,8 +262,8 @@ def test_shader_graph(t : T?) {
         //! Clipboard fidelity: copy preserves internal links + relative layout.
         t |> run("clipboard") <| @(t : T?) {
             let s = ne_open(d, "MAIN_WIN/shader_graph")
-            t |> success(s.handle != uint64(0), "editor handle present")
-            if (s.handle == uint64(0)) return
+            t |> success(s.handle != 0ul, "editor handle present")
+            if (s.handle == 0ul) return
             t |> success(ne_wait_widget(s, "node_5", 15.0f) != null, "sample graph rendered")
             t |> equal(ne_node_count(s), 4, "4 sample nodes initially")
 
@@ -311,8 +311,8 @@ def test_shader_graph(t : T?) {
         //! Right-click background context menu opens the Create-Node menu (synth right-click).
         t |> run("context_menu") <| @(t : T?) {
             let s = ne_open(d, "MAIN_WIN/shader_graph")
-            t |> success(s.handle != uint64(0), "editor canvas rendered + handle present")
-            if (s.handle == uint64(0)) return
+            t |> success(s.handle != 0ul, "editor canvas rendered + handle present")
+            if (s.handle == 0ul) return
             // Menu items are absent while the popup is closed.
             t |> success(!widget_exists(ne_snapshot(s), "{s.canvas}/BG_CTX/CREATE_TEX"),
                          "create-node menu closed initially")
@@ -347,8 +347,8 @@ def test_shader_graph(t : T?) {
         //! Node-creation-by-drag: drag-release opens the filtered create menu; pick spawns + links.
         t |> run("new_node_drag") <| @(t : T?) {
             let s = ne_open(d, "MAIN_WIN/shader_graph")
-            t |> success(s.handle != uint64(0), "editor canvas rendered + handle present")
-            if (s.handle == uint64(0)) return
+            t |> success(s.handle != 0ul, "editor canvas rendered + handle present")
+            if (s.handle == 0ul) return
             // The filtered menu items aren't at their full path until the menu opens.
             t |> success(!widget_exists(ne_snapshot(s), "{s.canvas}/BG_CTX/CREATE_ADD"),
                          "create-node menu closed initially")

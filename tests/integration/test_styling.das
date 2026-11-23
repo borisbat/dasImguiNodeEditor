@@ -21,8 +21,8 @@ let SUBJECT = "modules/dasImguiNodeEditor/examples/tutorial/styling.das"
 def test_styling(t : T?) {
     with_node_editor_app(SUBJECT) $(d) {
         let s = ne_open(d, "MAIN_WIN/graph")
-        t |> success(s.handle != uint64(0), "editor handle present")
-        if (s.handle == uint64(0)) return
+        t |> success(s.handle != 0ul, "editor handle present")
+        if (s.handle == 0ul) return
 
         var snap = ne_wait_widget(s, "node_3", 15.0f)
         t |> success(snap != null, "styled output node (node_3) rendered")

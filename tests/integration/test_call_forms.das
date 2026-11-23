@@ -29,8 +29,8 @@ def test_call_forms(t : T?) {
         t |> run("call_forms") <| @(t : T?) {
             // node_editor with `size` OMITTED still renders (container auto-fill) + exposes its handle.
             let s = ne_open(d, "MAIN_WIN/forms")
-            t |> success(s.handle != uint64(0), "size-omitted node_editor rendered + handle present")
-            if (s.handle == uint64(0)) return
+            t |> success(s.handle != 0ul, "size-omitted node_editor rendered + handle present")
+            if (s.handle == 0ul) return
             var snap = ne_snapshot(s)
 
             // node: non-tuple AND tuple forms both render under the canvas.
@@ -65,8 +65,8 @@ def test_call_forms(t : T?) {
         //! Snapshot geometry is uniformly SCREEN-space; canvas-local rect rides as canvas_bbox.
         t |> run("snapshot_space") <| @(t : T?) {
             let s = ne_open(d, "MAIN_WIN/forms")
-            t |> success(s.handle != uint64(0), "node_editor canvas rendered + handle present")
-            if (s.handle == uint64(0)) return
+            t |> success(s.handle != 0ul, "node_editor canvas rendered + handle present")
+            if (s.handle == 0ul) return
             var snap = ne_snapshot(s)
 
             // ---- 1. pins have real screen-space geometry (were a zero bbox pre-fix) ----
