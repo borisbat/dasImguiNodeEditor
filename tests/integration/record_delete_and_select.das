@@ -35,7 +35,7 @@ def main {
         let T_L101 = "{CANVAS}/link_101"
 
         let s = ne_open(app, CANVAS)
-        if (s.handle == uint64(0)) {
+        if (s.handle == 0ul) {
             panic("{CANVAS} never rendered / no editor handle - wrong app running?")
         }
         var snap = wait_for_widget(app, T_B, 15.0f)

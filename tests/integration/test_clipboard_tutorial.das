@@ -30,8 +30,8 @@ let SUBJECT = "modules/dasImguiNodeEditor/examples/tutorial/clipboard.das"
 def test_clipboard_tutorial(t : T?) {
     with_node_editor_app(SUBJECT) $(d) {
         let s = ne_open(d, "MAIN_WIN/graph")
-        t |> success(s.handle != uint64(0), "editor handle present")
-        if (s.handle == uint64(0)) return
+        t |> success(s.handle != 0ul, "editor handle present")
+        if (s.handle == 0ul) return
         let canvas = s.canvas
         let shortcut_mod = "Ctrl"
 

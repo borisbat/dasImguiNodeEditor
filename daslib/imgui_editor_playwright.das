@@ -25,10 +25,10 @@ def public ne_open(app : ImguiApp; canvas : string; timeout_sec : float = 15.0f)
     //! Wait for `canvas` to render, then pull its editor handle from the node_editor payload.
     //! Returns a session bundling {app, handle, canvas}; handle stays 0 if the canvas never
     //! appeared (the caller should assert `s.handle != 0u`).
-    var s = EditorSession(app = app, canvas = canvas, handle = uint64(0))
+    var s = EditorSession(app = app, canvas = canvas, handle = 0ul)
     var snap = wait_for_widget(app, canvas, timeout_sec)
     if (snap != null) {
-        s.handle = find_widget(snap, canvas)?["payload"]?["handle"] ?? uint64(0)
+        s.handle = find_widget(snap, canvas)?["payload"]?["handle"] ?? 0ul
     }
     return s
 }

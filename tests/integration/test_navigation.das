@@ -29,8 +29,8 @@ def widget_center(var snap : JsonValue?; ident : string) : float2 {
 def test_navigation(t : T?) {
     with_node_editor_app(SUBJECT) $(d) {
         let s = ne_open(d, "MAIN_WIN/graph")
-        t |> success(s.handle != uint64(0), "editor handle present")
-        if (s.handle == uint64(0)) return
+        t |> success(s.handle != 0ul, "editor handle present")
+        if (s.handle == 0ul) return
 
         var snap = ne_wait_widget(s, "node_3", 15.0f)
         t |> success(snap != null, "far node (node_3) rendered at the default view")

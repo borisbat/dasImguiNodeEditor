@@ -37,8 +37,8 @@ def right_click(d : ImguiApp; pt : tuple<float; float>) {
 def test_context_menus(t : T?) {
     with_node_editor_app(SUBJECT) $(d) {
         let s = ne_open(d, "MAIN_WIN/graph")
-        t |> success(s.handle != uint64(0), "editor handle present")
-        if (s.handle == uint64(0)) return
+        t |> success(s.handle != 0ul, "editor handle present")
+        if (s.handle == 0ul) return
         let canvas = s.canvas
         var snap = ne_wait_widget(s, "node_1", 15.0f)
         t |> success(snap != null, "seed graph rendered (node_1 present)")
